@@ -705,6 +705,321 @@ th.numeric {
   }
 }
 
+
+@media (max-width: 720px) {
+  body {
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .app-shell {
+    min-height: auto;
+  }
+
+  .sidebar {
+    padding: 16px 14px 14px;
+    gap: 16px;
+  }
+
+  .brand {
+    gap: 10px;
+  }
+
+  .brand-mark {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    font-size: 17px;
+  }
+
+  .brand h1 {
+    font-size: 19px;
+  }
+
+  .brand p,
+  .eyebrow {
+    font-size: 13px;
+  }
+
+  .nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .nav-item,
+  .ghost-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 46px;
+    padding: 12px 10px;
+    font-size: 15px;
+    font-weight: 700;
+    text-align: center;
+    touch-action: manipulation;
+  }
+
+  .side-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .save-status,
+  .cloud-status {
+    grid-column: 1 / -1;
+    padding: 11px 12px;
+    font-size: 13px;
+  }
+
+  .workspace {
+    padding: 16px 12px 24px;
+  }
+
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .topbar h2 {
+    font-size: 26px;
+  }
+
+  .top-actions,
+  .form-actions,
+  .setup-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+
+  .top-actions button,
+  .form-actions button,
+  .setup-actions button,
+  .panel-head > button {
+    width: 100%;
+  }
+
+  .primary-button,
+  .secondary-button,
+  .text-button,
+  .icon-action,
+  .segmented button {
+    min-height: 44px;
+    padding: 11px 14px;
+    font-size: 15px;
+    touch-action: manipulation;
+  }
+
+  .text-button {
+    padding: 10px 12px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .metric {
+    padding: 14px;
+  }
+
+  .metric span {
+    font-size: 13px;
+  }
+
+  .metric strong {
+    margin-top: 4px;
+    font-size: 24px;
+  }
+
+  .panel {
+    padding: 14px 12px;
+  }
+
+  .panel + .panel {
+    margin-top: 14px;
+  }
+
+  .panel-head {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .panel h3,
+  .panel-head h3 {
+    font-size: 18px;
+  }
+
+  .search {
+    width: 100%;
+    max-width: none;
+  }
+
+  form {
+    gap: 14px;
+  }
+
+  label {
+    gap: 6px;
+    font-size: 13px;
+  }
+
+  input,
+  select,
+  textarea {
+    min-height: 46px;
+    padding: 11px 12px;
+    font-size: 16px;
+  }
+
+  textarea {
+    min-height: 82px;
+  }
+
+  .checkbox-label {
+    align-items: flex-start;
+    font-size: 15px;
+  }
+
+  .checkbox-label input {
+    width: 20px;
+    height: 20px;
+    margin-top: 2px;
+  }
+
+  .entry-lines {
+    gap: 10px;
+  }
+
+  .entry-line {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .entry-line > button {
+    width: 100%;
+  }
+
+  .table-wrap {
+    margin-inline: -2px;
+    padding-bottom: 4px;
+  }
+
+  table {
+    min-width: 640px;
+  }
+
+  th,
+  td {
+    padding: 11px 10px;
+    font-size: 14px;
+  }
+
+  th {
+    font-size: 13px;
+  }
+
+  .row-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .icon-action {
+    min-width: 44px;
+    border-radius: 8px;
+  }
+
+  .editable-table input {
+    min-width: 84px;
+    min-height: 42px;
+    padding: 9px 10px;
+    font-size: 16px;
+  }
+
+  .totals {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 15px;
+  }
+
+  .totals span {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .totals strong {
+    margin-left: 0;
+  }
+
+  .segmented {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .segmented button {
+    padding: 10px 8px;
+    font-size: 14px;
+  }
+
+  .list-item {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px;
+    font-size: 15px;
+  }
+
+  .onboarding {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .onboarding-card {
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+    padding: 18px 16px;
+  }
+
+  .onboarding-head span {
+    font-size: 13px;
+  }
+
+  .onboarding-card h2 {
+    font-size: 22px;
+  }
+
+  .onboarding-card p {
+    font-size: 15px;
+  }
+
+  #toast {
+    right: 12px;
+    bottom: 14px;
+    left: 12px;
+    padding: 13px 14px;
+    font-size: 15px;
+    text-align: center;
+  }
+}
+
+@media (max-width: 380px) {
+  .top-actions,
+  .form-actions,
+  .setup-actions,
+  .side-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media print {
   @page {
     size: A4;
