@@ -51,3 +51,9 @@ Microsoft Graph APIを使い、OneDriveのアプリ専用フォルダに台帳JS
 ## GitHub管理について
 
 GitHubで管理する場合は、台帳JSONやバックアップJSONをコミットしないでください。運用メモは [docs/GITHUB_WORKFLOW.md](docs/GITHUB_WORKFLOW.md) にまとめています。
+
+## Google Apps Script + Google Drive版
+
+スマホとPCで同期して使うための簡易クラウド版を `gas-drive-app/` に追加しました。Google Apps ScriptのWebアプリとして公開し、台帳JSONをGoogle Driveに保存します。
+
+Microsoft Entra / OneDrive Graph API の設定が不要なので、個人利用ではこちらの方が始めやすい構成です。詳しい手順は [gas-drive-app/README.md](gas-drive-app/README.md) を参照してください。

@@ -1,0 +1,335 @@
+﻿<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>委託販売管理・精算請求システム</title>
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">委</div>
+        <div>
+          <h1>委託販売管理</h1>
+          <p>納品・在庫・精算・請求</p>
+        </div>
+      </div>
+      <nav class="nav" aria-label="メインメニュー">
+        <button class="nav-item active" data-view="dashboard">ホーム</button>
+        <button class="nav-item" data-view="partners">取引先</button>
+        <button class="nav-item" data-view="products">商品</button>
+        <button class="nav-item" data-view="deliveries">委託納品</button>
+        <button class="nav-item" data-view="settlements">精算・請求</button>
+        <button class="nav-item" data-view="inventory">在庫</button>
+        <button class="nav-item" data-view="reports">売上集計</button>
+        <button class="nav-item" data-view="settings">設定</button>
+      </nav>
+      <div class="side-actions">
+        <div id="googleDriveStatus" class="cloud-status">Google Drive: 読込待ち</div>
+        <button id="loadGoogleDrive" class="ghost-button">Google Driveから再読込</button>
+        <button id="saveGoogleDrive" class="ghost-button">Google Driveへ保存</button>
+        <div id="autoSaveStatus" class="save-status gas-hidden">自動保存: Google Drive</div>
+        <div id="oneDriveStatus" class="cloud-status gas-hidden">OneDrive: 未接続</div>
+        <button id="showGuide" class="ghost-button">使い方ガイド</button>
+        <button id="connectOneDrive" class="ghost-button gas-hidden">OneDrive接続</button>
+        <button id="loadOneDrive" class="ghost-button gas-hidden">OneDriveから読込</button>
+        <button id="saveOneDrive" class="ghost-button gas-hidden">OneDriveへ保存</button>
+        <button id="chooseAutoSaveFile" class="ghost-button gas-hidden">自動保存先設定</button>
+        <button id="openLedgerFile" class="ghost-button gas-hidden">台帳ファイル読込</button>
+        <button id="exportData" class="ghost-button">手動バックアップ</button>
+        <label class="ghost-button file-button">
+          予備データ読込
+          <input id="importData" type="file" accept="application/json">
+        </label>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Local ledger</p>
+          <h2 id="viewTitle">ホーム</h2>
+        </div>
+        <div class="top-actions">
+          <button id="seedData" class="secondary-button">サンプル投入</button>
+          <button id="printCurrent" class="primary-button">A4印刷</button>
+        </div>
+      </header>
+
+      <section id="setupPrompt" class="setup-prompt" hidden>
+        <div>
+          <strong>Google Driveの台帳を読み込みます</strong><p>この版はGoogle Drive内の台帳JSONへ自動保存します。初回はGoogleの承認画面が表示されます。</p>
+        </div>
+        <div class="setup-actions">
+          <button id="setupAutoSaveFile" class="primary-button">Google Driveへ保存</button>
+          <button id="dismissSetupPrompt" class="secondary-button">あとで</button>
+        </div>
+      </section>
+
+      <section id="dashboard" class="view active">
+        <div class="stats-grid">
+          <article class="metric">
+            <span>取引先</span>
+            <strong id="statPartners">0</strong>
+          </article>
+          <article class="metric">
+            <span>商品</span>
+            <strong id="statProducts">0</strong>
+          </article>
+          <article class="metric">
+            <span>預け在庫</span>
+            <strong id="statInventory">0</strong>
+          </article>
+          <article class="metric">
+            <span>未精算見込</span>
+            <strong id="statRevenue">¥0</strong>
+          </article>
+        </div>
+        <div class="two-column">
+          <section class="panel">
+            <div class="panel-head">
+              <h3>最近の精算</h3>
+              <button class="text-button" data-view-link="settlements">開く</button>
+            </div>
+            <div id="recentSettlements" class="list"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head">
+              <h3>取引先別在庫</h3>
+              <button class="text-button" data-view-link="inventory">開く</button>
+            </div>
+            <div id="partnerInventorySummary" class="list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="partners" class="view">
+        <div class="split">
+          <form id="partnerForm" class="panel form-panel">
+            <h3>取引先登録</h3>
+            <input type="hidden" name="id">
+            <label>取引先名<input name="name" required></label>
+            <label>担当者名<input name="person"></label>
+            <label>住所<textarea name="address" rows="2"></textarea></label>
+            <div class="form-row">
+              <label>電話番号<input name="phone"></label>
+              <label>メール<input name="email" type="email"></label>
+            </div>
+            <div class="form-row">
+              <label>締日<input name="closingDay" placeholder="末日 / 20日"></label>
+              <label>支払条件<input name="paymentTerms" placeholder="翌月末振込"></label>
+            </div>
+            <div class="form-row">
+              <label>手数料率(%)<input name="commissionRate" type="number" min="0" max="100" step="0.1" value="30"></label>
+              <label>掛率(%)<input name="wholesaleRate" type="number" min="0" max="100" step="0.1"></label>
+            </div>
+            <label>備考<textarea name="notes" rows="2"></textarea></label>
+            <div class="form-actions">
+              <button type="button" class="secondary-button" data-reset-form="partnerForm">新規</button>
+              <button class="primary-button">保存</button>
+            </div>
+          </form>
+          <section class="panel">
+            <div class="panel-head">
+              <h3>取引先一覧</h3>
+              <input id="partnerSearch" class="search" placeholder="検索">
+            </div>
+            <div id="partnerList" class="table-wrap"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="products" class="view">
+        <div class="split">
+          <form id="productForm" class="panel form-panel">
+            <h3>商品登録</h3>
+            <input type="hidden" name="id">
+            <label>商品ID<input name="sku" required></label>
+            <label>商品名<input name="name" required></label>
+            <div class="form-row">
+              <label>カテゴリ<input name="category"></label>
+              <label>販売価格<input name="price" type="number" min="0" step="1" required></label>
+            </div>
+            <div class="form-row">
+              <label>税区分
+                <select name="taxType">
+                  <option value="taxable">課税 10%</option>
+                  <option value="reduced">軽減 8%</option>
+                  <option value="exempt">非課税</option>
+                </select>
+              </label>
+              <label>原価<input name="cost" type="number" min="0" step="1"></label>
+            </div>
+            <div class="form-row">
+              <label>手数料率(%)<input name="commissionRate" type="number" min="0" max="100" step="0.1"></label>
+              <label>掛率(%)<input name="wholesaleRate" type="number" min="0" max="100" step="0.1"></label>
+            </div>
+            <label>商品画像<input name="image" type="file" accept="image/*"></label>
+            <img id="productImagePreview" class="image-preview" alt="">
+            <label>備考<textarea name="notes" rows="2"></textarea></label>
+            <div class="form-actions">
+              <button type="button" class="secondary-button" data-reset-form="productForm">新規</button>
+              <button class="primary-button">保存</button>
+            </div>
+          </form>
+          <section class="panel">
+            <div class="panel-head">
+              <h3>商品一覧</h3>
+              <input id="productSearch" class="search" placeholder="検索">
+            </div>
+            <div id="productList" class="table-wrap"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="deliveries" class="view">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>委託納品登録</h3>
+            <button id="addDeliveryLine" class="secondary-button">行追加</button>
+          </div>
+          <form id="deliveryForm">
+            <div class="form-row wide">
+              <label>納品日<input name="date" type="date" required></label>
+              <label>取引先<select name="partnerId" required></select></label>
+              <label>納品書番号<input name="number" readonly></label>
+            </div>
+            <div id="deliveryLines" class="entry-lines"></div>
+            <label>備考<textarea name="notes" rows="2"></textarea></label>
+            <div class="form-actions">
+              <button type="button" id="resetDelivery" class="secondary-button">入力クリア</button>
+              <button class="primary-button">納品登録</button>
+            </div>
+          </form>
+        </div>
+        <section class="panel">
+          <div class="panel-head">
+            <h3>納品履歴</h3>
+          </div>
+          <div id="deliveryHistory" class="table-wrap"></div>
+        </section>
+      </section>
+
+      <section id="settlements" class="view">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>精算登録</h3>
+            <button id="buildSettlement" class="secondary-button">在庫読込</button>
+          </div>
+          <form id="settlementForm">
+            <div class="form-row wide">
+              <label>精算日<input name="date" type="date" required></label>
+              <label>取引先<select name="partnerId" required></select></label>
+              <label>精算期間開始<input name="periodStart" type="date"></label>
+              <label>精算期間終了<input name="periodEnd" type="date"></label>
+            </div>
+            <div class="form-row wide">
+              <label>精算書番号<input name="settlementNumber" readonly></label>
+              <label>請求書番号<input name="invoiceNumber" readonly></label>
+            </div>
+            <div id="settlementLines" class="table-wrap editable-table"></div>
+            <label>備考<textarea name="notes" rows="2"></textarea></label>
+            <div class="totals">
+              <span>販売金額 <strong id="settleGross">¥0</strong></span>
+              <span>手数料 <strong id="settleCommission">¥0</strong></span>
+              <span>消費税 <strong id="settleTax">¥0</strong></span>
+              <span>合計請求額 <strong id="settleTotal">¥0</strong></span>
+            </div>
+            <div class="form-actions">
+              <button type="button" id="resetSettlement" class="secondary-button">入力クリア</button>
+              <button class="primary-button">精算登録</button>
+            </div>
+          </form>
+        </div>
+        <section class="panel">
+          <div class="panel-head">
+            <h3>精算・請求履歴</h3>
+          </div>
+          <div id="settlementHistory" class="table-wrap"></div>
+        </section>
+      </section>
+
+      <section id="inventory" class="view">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>現在在庫</h3>
+            <div class="segmented">
+              <button class="active" data-inventory-mode="partner">取引先別</button>
+              <button data-inventory-mode="product">商品別</button>
+              <button data-inventory-mode="stale">長期滞留</button>
+            </div>
+          </div>
+          <div id="inventoryTable" class="table-wrap"></div>
+        </div>
+      </section>
+
+      <section id="reports" class="view">
+        <div class="stats-grid">
+          <article class="metric"><span>累計販売金額</span><strong id="reportGross">¥0</strong></article>
+          <article class="metric"><span>累計請求額</span><strong id="reportTotal">¥0</strong></article>
+          <article class="metric"><span>累計販売数</span><strong id="reportUnits">0</strong></article>
+          <article class="metric"><span>平均手数料率</span><strong id="reportRate">0%</strong></article>
+        </div>
+        <div class="two-column">
+          <section class="panel">
+            <h3>取引先別売上</h3>
+            <div id="partnerSales" class="table-wrap"></div>
+          </section>
+          <section class="panel">
+            <h3>商品別売上</h3>
+            <div id="productSales" class="table-wrap"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="settings" class="view">
+        <form id="settingsForm" class="panel form-panel settings-panel">
+          <h3>自社・帳票設定</h3>
+          <label>屋号・会社名<input name="companyName"></label>
+          <label>住所<textarea name="companyAddress" rows="2"></textarea></label>
+          <div class="form-row">
+            <label>電話番号<input name="companyPhone"></label>
+            <label>メール<input name="companyEmail" type="email"></label>
+          </div>
+          <div class="form-row">
+            <label>インボイス登録番号<input name="invoiceRegistration"></label>
+            <label>消費税率(%)<input name="taxRate" type="number" min="0" step="0.1"></label>
+          </div>
+          <label>振込先<textarea name="bankInfo" rows="3"></textarea></label>
+          <label>帳票備考<textarea name="documentNote" rows="2"></textarea></label>
+          <div class="gas-hidden"><input name="oneDriveClientId"><input name="oneDriveFileName"><input name="oneDriveAutoSync" type="checkbox"></div>
+          <div class="form-actions">
+            <button class="primary-button">設定保存</button>
+          </div>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <div id="printArea" aria-hidden="true"></div>
+  <div id="onboarding" class="onboarding" hidden role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
+    <div class="onboarding-card">
+      <div class="onboarding-head">
+        <span id="onboardingStepCount">1 / 6</span>
+        <button id="closeOnboarding" class="icon-action" type="button">閉じる</button>
+      </div>
+      <h2 id="onboardingTitle">使い方ガイド</h2>
+      <p id="onboardingBody"></p>
+      <div class="onboarding-actions">
+        <button id="skipOnboarding" class="secondary-button" type="button">次回から表示しない</button>
+        <div>
+          <button id="prevOnboarding" class="secondary-button" type="button">戻る</button>
+          <button id="nextOnboarding" class="primary-button" type="button">次へ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="toast" role="status"></div>
+  <?!= include('Client'); ?>
+</body>
+</html>
+
+
+
