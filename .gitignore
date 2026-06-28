@@ -1,0 +1,17 @@
+﻿# local ledger and backups
+委託販売管理_台帳.json
+*_台帳.json
+*バックアップ*.json
+*.Zone.Identifier
+
+# packaged artifacts
+*.zip
+委託販売管理アプリ_配布用/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+*:Zone.Identifier
+

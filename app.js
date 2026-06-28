@@ -1,0 +1,1347 @@
+﻿(function () {
+  "use strict";
+
+  const STORAGE_KEY = "consignment-ledger-v1";
+  const HANDLE_DB = "consignment-ledger-file";
+  const HANDLE_STORE = "handles";
+  const HANDLE_KEY = "ledger";
+  const SETUP_DISMISSED_KEY = "consignment-ledger-setup-dismissed";
+  const ONBOARDING_DONE_KEY = "consignment-ledger-onboarding-done";
+  const ONBOARDING_VERSION = "2026-06-05";
+  const ONEDRIVE_ETAG_KEY = "consignment-ledger-onedrive-etag";
+  const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+  const GRAPH_SCOPES = ["Files.ReadWrite.AppFolder"];
+  const taxRates = { taxable: 10, reduced: 8, exempt: 0 };
+  const taxNames = { taxable: "課税10%", reduced: "軽減8%", exempt: "非課税" };
+
+  const emptyState = {
+    partners: [],
+    products: [],
+    deliveries: [],
+    settlements: [],
+    settings: {
+      companyName: "",
+      companyAddress: "",
+      companyPhone: "",
+      companyEmail: "",
+      invoiceRegistration: "",
+      taxRate: 10,
+      bankInfo: "",
+      documentNote: "",
+      oneDriveClientId: "",
+      oneDriveFileName: "委託販売管理_台帳.json",
+      oneDriveAutoSync: false
+    },
+    lastDocument: null
+  };
+
+  let state = loadState();
+  let productImageDraft = "";
+  let inventoryMode = "partner";
+  let ledgerFileHandle = null;
+  let fileSaveTimer = null;
+  let fileSaveInProgress = false;
+  let fileSaveQueued = false;
+  let onboardingIndex = 0;
+  let msalApp = null;
+  let msalClientId = "";
+  let oneDriveFileETag = localStorage.getItem(ONEDRIVE_ETAG_KEY) || "";
+  let oneDriveSaveTimer = null;
+  let oneDriveSaveInProgress = false;
+  let oneDriveSaveQueued = false;
+
+  const onboardingSteps = [
+    {
+      title: "最初に台帳ファイルを決めます",
+      body: "このアプリはPC内のJSONファイルへ自動保存できます。\nまず左側の「自動保存先設定」で保存先を選んでください。選んだ後は登録や編集のたびに自動で保存されます。",
+      view: "dashboard"
+    },
+    {
+      title: "自社情報と帳票設定を入れます",
+      body: "「設定」で屋号、住所、電話番号、振込先、インボイス登録番号を入力します。\nここに入れた内容が納品書や請求書に印字されます。",
+      view: "settings"
+    },
+    {
+      title: "取引先と商品を登録します",
+      body: "委託先は「取引先」、預ける品物は「商品」に登録します。\n取引先ごとの手数料率や掛率、商品の販売価格や税区分もここで管理します。",
+      view: "partners"
+    },
+    {
+      title: "委託納品を登録します",
+      body: "「委託納品」で、いつ、どの取引先へ、どの商品を何個預けたかを登録します。\n登録した内容からA4の委託販売納品書を印刷できます。",
+      view: "deliveries"
+    },
+    {
+      title: "販売数を入れて精算します",
+      body: "「精算・請求」で取引先を選び、「在庫読込」を押すと現在の預け在庫が表示されます。\n販売数や返品数を入力すると、手数料、消費税、請求額が自動計算されます。",
+      view: "settlements"
+    },
+    {
+      title: "在庫確認と印刷ができます",
+      body: "「在庫」で取引先別・商品別・長期滞留を確認できます。\n納品履歴や精算履歴の「印刷」からA4帳票を出し、印刷画面でPDF保存もできます。",
+      view: "inventory"
+    }
+  ];
+
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+  const yen = (value) => new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(Math.round(Number(value) || 0));
+  const number = (value) => new Intl.NumberFormat("ja-JP").format(Number(value) || 0);
+  const today = () => new Date().toISOString().slice(0, 10);
+  const uid = (prefix) => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]);
+  const nl = (value) => esc(value).replace(/\n/g, "<br>");
+
+  function normalizeState(data = {}) {
+    return {
+      ...structuredClone(emptyState),
+      ...data,
+      settings: { ...emptyState.settings, ...(data.settings || {}) }
+    };
+  }
+
+  function loadState() {
+    try {
+      return normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY)) || {});
+    } catch {
+      return structuredClone(emptyState);
+    }
+  }
+
+  function saveState() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    queueFileSave();
+    queueOneDriveSave();
+  }
+
+  function supportsFileSystemAccess() {
+    return "showSaveFilePicker" in window && "showOpenFilePicker" in window;
+  }
+
+  function dbRequest(request) {
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  function transactionDone(tx) {
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  }
+
+  async function openHandleDb() {
+    const request = indexedDB.open(HANDLE_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(HANDLE_STORE);
+    return dbRequest(request);
+  }
+
+  async function setStoredFileHandle(handle) {
+    const db = await openHandleDb();
+    const tx = db.transaction(HANDLE_STORE, "readwrite");
+    tx.objectStore(HANDLE_STORE).put(handle, HANDLE_KEY);
+    await transactionDone(tx);
+    db.close();
+  }
+
+  async function getStoredFileHandle() {
+    const db = await openHandleDb();
+    const tx = db.transaction(HANDLE_STORE, "readonly");
+    const handle = await dbRequest(tx.objectStore(HANDLE_STORE).get(HANDLE_KEY));
+    db.close();
+    return handle || null;
+  }
+
+  async function verifyFilePermission(handle, mode = "readwrite") {
+    const options = { mode };
+    if ((await handle.queryPermission(options)) === "granted") return true;
+    return (await handle.requestPermission(options)) === "granted";
+  }
+
+  async function hasFilePermission(handle, mode = "readwrite") {
+    return (await handle.queryPermission({ mode })) === "granted";
+  }
+
+  async function writeLedgerFile() {
+    if (!ledgerFileHandle) return;
+    if (fileSaveInProgress) {
+      fileSaveQueued = true;
+      return;
+    }
+    fileSaveInProgress = true;
+    try {
+      if (!(await hasFilePermission(ledgerFileHandle, "readwrite"))) {
+        setAutoSaveStatus("自動保存: 権限が必要", "warning");
+        return;
+      }
+      const writable = await ledgerFileHandle.createWritable();
+      await writable.write(JSON.stringify(state, null, 2));
+      await writable.close();
+      setAutoSaveStatus(`自動保存中: ${ledgerFileHandle.name}`, "ready");
+    } catch (error) {
+      console.error(error);
+      setAutoSaveStatus("自動保存: 失敗", "warning");
+      toast("台帳ファイルへの自動保存に失敗しました。");
+    } finally {
+      fileSaveInProgress = false;
+      if (fileSaveQueued) {
+        fileSaveQueued = false;
+        queueFileSave(100);
+      }
+    }
+  }
+
+  function queueFileSave(delay = 400) {
+    if (!ledgerFileHandle) return;
+    clearTimeout(fileSaveTimer);
+    fileSaveTimer = setTimeout(writeLedgerFile, delay);
+  }
+
+  function setAutoSaveStatus(message, mode = "") {
+    const status = $("#autoSaveStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.toggle("ready", mode === "ready");
+    status.classList.toggle("warning", mode === "warning");
+  }
+
+  function updateSetupPrompt() {
+    const prompt = $("#setupPrompt");
+    if (!prompt) return;
+    const dismissed = localStorage.getItem(SETUP_DISMISSED_KEY) === "1";
+    prompt.hidden = Boolean(ledgerFileHandle || dismissed);
+  }
+
+  function updateOnboarding() {
+    const box = $("#onboarding");
+    if (!box) return;
+    const step = onboardingSteps[onboardingIndex];
+    $("#onboardingStepCount").textContent = `${onboardingIndex + 1} / ${onboardingSteps.length}`;
+    $("#onboardingTitle").textContent = step.title;
+    $("#onboardingBody").textContent = step.body;
+    $("#prevOnboarding").disabled = onboardingIndex === 0;
+    $("#nextOnboarding").textContent = onboardingIndex === onboardingSteps.length - 1 ? "完了" : "次へ";
+  }
+
+  function showOnboarding(force = false) {
+    if (!force && localStorage.getItem(ONBOARDING_DONE_KEY) === ONBOARDING_VERSION) return;
+    onboardingIndex = 0;
+    $("#onboarding").hidden = false;
+    showView(onboardingSteps[onboardingIndex].view);
+    updateOnboarding();
+  }
+
+  function closeOnboarding(markDone = false) {
+    if (markDone) localStorage.setItem(ONBOARDING_DONE_KEY, ONBOARDING_VERSION);
+    $("#onboarding").hidden = true;
+  }
+
+  function nextOnboarding() {
+    if (onboardingIndex >= onboardingSteps.length - 1) {
+      closeOnboarding(true);
+      return;
+    }
+    onboardingIndex += 1;
+    showView(onboardingSteps[onboardingIndex].view);
+    updateOnboarding();
+  }
+
+  function prevOnboarding() {
+    if (onboardingIndex <= 0) return;
+    onboardingIndex -= 1;
+    showView(onboardingSteps[onboardingIndex].view);
+    updateOnboarding();
+  }
+
+  async function loadStateFromFileHandle(handle) {
+    const file = await handle.getFile();
+    const text = await file.text();
+    const data = JSON.parse(text);
+    state = normalizeState(data);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  async function chooseAutoSaveFile() {
+    if (!supportsFileSystemAccess()) {
+      toast("このブラウザでは自動保存先設定に対応していません。ChromeまたはEdgeで開いてください。");
+      setAutoSaveStatus("自動保存: 非対応ブラウザ", "warning");
+      return;
+    }
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: "委託販売管理_台帳.json",
+        types: [{ description: "JSON台帳ファイル", accept: { "application/json": [".json"] } }]
+      });
+      ledgerFileHandle = handle;
+      await setStoredFileHandle(handle);
+      await writeLedgerFile();
+      localStorage.removeItem(SETUP_DISMISSED_KEY);
+      updateSetupPrompt();
+      toast("自動保存先を設定しました。");
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        console.error(error);
+        toast("自動保存先を設定できませんでした。");
+      }
+    }
+  }
+
+  async function openLedgerFile() {
+    if (!supportsFileSystemAccess()) {
+      toast("このブラウザでは台帳ファイル読込に対応していません。予備データ読込を使ってください。");
+      setAutoSaveStatus("自動保存: 非対応ブラウザ", "warning");
+      return;
+    }
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        multiple: false,
+        types: [{ description: "JSON台帳ファイル", accept: { "application/json": [".json"] } }]
+      });
+      if (!handle) return;
+      await loadStateFromFileHandle(handle);
+      ledgerFileHandle = handle;
+      await setStoredFileHandle(handle);
+      localStorage.removeItem(SETUP_DISMISSED_KEY);
+      render();
+      resetDeliveryForm();
+      resetSettlementForm();
+      updateSetupPrompt();
+      if (await verifyFilePermission(handle, "readwrite")) {
+        setAutoSaveStatus(`自動保存中: ${handle.name}`, "ready");
+        toast("台帳ファイルを読み込みました。以後はこのファイルへ自動保存します。");
+      } else {
+        setAutoSaveStatus("自動保存: 書込権限が必要", "warning");
+        toast("台帳ファイルを読み込みました。自動保存には書込権限が必要です。");
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        console.error(error);
+        toast("台帳ファイルを読み込めませんでした。");
+      }
+    }
+  }
+
+  async function initAutoSaveFile() {
+    if (!supportsFileSystemAccess()) {
+      setAutoSaveStatus("自動保存: 非対応ブラウザ", "warning");
+      return;
+    }
+    try {
+      const handle = await getStoredFileHandle();
+      if (!handle) {
+        setAutoSaveStatus("自動保存: 未設定", "warning");
+        updateSetupPrompt();
+        return;
+      }
+      ledgerFileHandle = handle;
+      if (await hasFilePermission(handle, "readwrite")) {
+        await loadStateFromFileHandle(handle);
+        setAutoSaveStatus(`自動保存中: ${handle.name}`, "ready");
+      } else {
+        setAutoSaveStatus("自動保存: 権限が必要", "warning");
+      }
+      updateSetupPrompt();
+    } catch (error) {
+      console.error(error);
+      setAutoSaveStatus("自動保存: 再設定が必要", "warning");
+      updateSetupPrompt();
+    }
+  }
+
+  function isOneDriveRuntimeSupported() {
+    return location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  }
+
+  function oneDriveClientId() {
+    return String(state.settings.oneDriveClientId || "").trim();
+  }
+
+  function oneDriveFileName() {
+    return String(state.settings.oneDriveFileName || "委託販売管理_台帳.json").trim() || "委託販売管理_台帳.json";
+  }
+
+  function oneDriveFileBaseUrl() {
+    return `${GRAPH_BASE}/me/drive/special/approot:/${encodeURIComponent(oneDriveFileName())}`;
+  }
+
+  function setOneDriveStatus(message, mode = "") {
+    const status = $("#oneDriveStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.toggle("ready", mode === "ready");
+    status.classList.toggle("warning", mode === "warning");
+    status.classList.toggle("error", mode === "error");
+  }
+
+  async function ensureMsalApp() {
+    const clientId = oneDriveClientId();
+    if (!clientId) throw new Error("Microsoft アプリケーションIDが未設定です。");
+    if (!isOneDriveRuntimeSupported()) throw new Error("OneDrive同期はHTTPSまたはlocalhostで開いた場合に利用できます。");
+    if (!window.msal) throw new Error("Microsoft認証ライブラリを読み込めませんでした。インターネット接続を確認してください。");
+    if (msalApp && msalClientId === clientId) return msalApp;
+    msalClientId = clientId;
+    msalApp = new msal.PublicClientApplication({
+      auth: {
+        clientId,
+        authority: "https://login.microsoftonline.com/common",
+        redirectUri: `${location.origin}${location.pathname}`
+      },
+      cache: { cacheLocation: "localStorage" }
+    });
+    return msalApp;
+  }
+
+  function activeOneDriveAccount(app) {
+    return app.getActiveAccount?.() || app.getAllAccounts()[0] || null;
+  }
+
+  async function signInOneDrive() {
+    try {
+      const app = await ensureMsalApp();
+      const result = await app.loginPopup({ scopes: GRAPH_SCOPES });
+      app.setActiveAccount(result.account);
+      setOneDriveStatus(`OneDrive: 接続中 (${result.account.username})`, "ready");
+      toast("OneDriveに接続しました。");
+    } catch (error) {
+      console.error(error);
+      setOneDriveStatus("OneDrive: 接続失敗", "error");
+      toast(error.message || "OneDriveに接続できませんでした。");
+    }
+  }
+
+  async function getGraphToken(interactive = true) {
+    const app = await ensureMsalApp();
+    let account = activeOneDriveAccount(app);
+    if (!account) {
+      if (!interactive) return null;
+      const result = await app.loginPopup({ scopes: GRAPH_SCOPES });
+      account = result.account;
+      app.setActiveAccount(account);
+    }
+    try {
+      const result = await app.acquireTokenSilent({ scopes: GRAPH_SCOPES, account });
+      return result.accessToken;
+    } catch (error) {
+      if (!interactive) return null;
+      const result = await app.acquireTokenPopup({ scopes: GRAPH_SCOPES, account });
+      return result.accessToken;
+    }
+  }
+
+  async function graphFetch(url, options = {}, interactive = true) {
+    const token = await getGraphToken(interactive);
+    if (!token) return null;
+    const headers = new Headers(options.headers || {});
+    headers.set("Authorization", `Bearer ${token}`);
+    return fetch(url, { ...options, headers });
+  }
+
+  async function fetchOneDriveMetadata(interactive = true) {
+    const url = `${oneDriveFileBaseUrl()}?$select=id,name,eTag,@microsoft.graph.downloadUrl`;
+    const response = await graphFetch(url, { method: "GET" }, interactive);
+    if (!response) return null;
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`OneDrive台帳情報の取得に失敗しました (${response.status})`);
+    return response.json();
+  }
+
+  async function loadLedgerFromOneDrive() {
+    try {
+      setOneDriveStatus("OneDrive: 読込中", "warning");
+      const metadata = await fetchOneDriveMetadata(true);
+      if (!metadata) {
+        if (confirm("OneDriveに台帳ファイルがありません。現在のデータで新規作成しますか？")) {
+          await saveLedgerToOneDrive(false);
+        } else {
+          setOneDriveStatus("OneDrive: 台帳なし", "warning");
+        }
+        return;
+      }
+      const downloadUrl = metadata["@microsoft.graph.downloadUrl"];
+      if (!downloadUrl) throw new Error("OneDrive台帳のダウンロードURLを取得できませんでした。");
+      const contentResponse = await fetch(downloadUrl, { cache: "no-store" });
+      if (!contentResponse.ok) throw new Error(`OneDrive台帳の読込に失敗しました (${contentResponse.status})`);
+      const remoteState = normalizeState(JSON.parse(await contentResponse.text()));
+      state = remoteState;
+      oneDriveFileETag = metadata.eTag || "";
+      localStorage.setItem(ONEDRIVE_ETAG_KEY, oneDriveFileETag);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      render();
+      resetDeliveryForm();
+      resetSettlementForm();
+      setOneDriveStatus(`OneDrive: 読込済 (${oneDriveFileName()})`, "ready");
+      toast("OneDriveから台帳を読み込みました。");
+    } catch (error) {
+      console.error(error);
+      setOneDriveStatus("OneDrive: 読込失敗", "error");
+      toast(error.message || "OneDriveから読み込めませんでした。");
+    }
+  }
+
+  async function saveLedgerToOneDrive(useETag = true, interactive = true) {
+    if (oneDriveSaveInProgress) {
+      oneDriveSaveQueued = true;
+      return;
+    }
+    oneDriveSaveInProgress = true;
+    try {
+      setOneDriveStatus("OneDrive: 保存中", "warning");
+      const headers = { "Content-Type": "application/json; charset=utf-8" };
+      if (useETag && oneDriveFileETag) headers["If-Match"] = oneDriveFileETag;
+      const response = await graphFetch(`${oneDriveFileBaseUrl()}:/content`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(state, null, 2)
+      }, interactive);
+      if (!response) {
+        setOneDriveStatus("OneDrive: 接続待ち", "warning");
+        return;
+      }
+      if (response.status === 412) {
+        setOneDriveStatus("OneDrive: 競合あり", "error");
+        toast("OneDrive側が先に更新されています。先にOneDriveから読み込んでください。");
+        return;
+      }
+      if (!response.ok) throw new Error(`OneDrive保存に失敗しました (${response.status})`);
+      const item = await response.json();
+      oneDriveFileETag = item.eTag || "";
+      localStorage.setItem(ONEDRIVE_ETAG_KEY, oneDriveFileETag);
+      setOneDriveStatus(`OneDrive: 保存済 (${oneDriveFileName()})`, "ready");
+      if (interactive) toast("OneDriveへ保存しました。");
+    } catch (error) {
+      console.error(error);
+      setOneDriveStatus("OneDrive: 保存失敗", "error");
+      if (interactive) toast(error.message || "OneDriveへ保存できませんでした。");
+    } finally {
+      oneDriveSaveInProgress = false;
+      if (oneDriveSaveQueued) {
+        oneDriveSaveQueued = false;
+        queueOneDriveSave(500);
+      }
+    }
+  }
+
+  function queueOneDriveSave(delay = 1200) {
+    clearTimeout(oneDriveSaveTimer);
+    if (!state.settings.oneDriveAutoSync || !oneDriveClientId()) return;
+    oneDriveSaveTimer = setTimeout(() => saveLedgerToOneDrive(true, false), delay);
+  }
+  function toast(message) {
+    const box = $("#toast");
+    box.textContent = message;
+    box.classList.add("show");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => box.classList.remove("show"), 2200);
+  }
+
+  function partnerName(id) {
+    return state.partners.find((p) => p.id === id)?.name || "未登録";
+  }
+
+  function productName(id) {
+    return state.products.find((p) => p.id === id)?.name || "未登録";
+  }
+
+  function productById(id) {
+    return state.products.find((p) => p.id === id);
+  }
+
+  function partnerById(id) {
+    return state.partners.find((p) => p.id === id);
+  }
+
+  function serial(prefix, collection) {
+    const year = new Date().getFullYear();
+    const count = collection.filter((item) => String(item.number || item.invoiceNumber || item.settlementNumber || "").includes(`${prefix}-${year}`)).length + 1;
+    return `${prefix}-${year}-${String(count).padStart(4, "0")}`;
+  }
+
+  function formData(form) {
+    return Object.fromEntries(new FormData(form).entries());
+  }
+
+  function fillForm(form, values) {
+    Object.entries(values).forEach(([key, value]) => {
+      const field = form.elements[key];
+      if (!field || field.type === "file") return;
+      if (field.type === "checkbox") {
+        field.checked = Boolean(value);
+        return;
+      }
+      field.value = value ?? "";
+    });
+  }
+
+  function resetPartnerForm() {
+    $("#partnerForm").reset();
+    $("#partnerForm").elements.id.value = "";
+    $("#partnerForm").elements.commissionRate.value = 30;
+  }
+
+  function resetProductForm() {
+    $("#productForm").reset();
+    $("#productForm").elements.id.value = "";
+    productImageDraft = "";
+    $("#productImagePreview").style.display = "none";
+    $("#productImagePreview").src = "";
+  }
+
+  function resetDeliveryForm() {
+    const form = $("#deliveryForm");
+    form.reset();
+    form.elements.date.value = today();
+    form.elements.number.value = serial("DN", state.deliveries);
+    $("#deliveryLines").innerHTML = "";
+    addDeliveryLine();
+  }
+
+  function resetSettlementForm() {
+    const form = $("#settlementForm");
+    form.reset();
+    form.elements.date.value = today();
+    form.elements.settlementNumber.value = serial("ST", state.settlements);
+    form.elements.invoiceNumber.value = serial("IV", state.settlements);
+    $("#settlementLines").innerHTML = `<p class="muted">取引先を選び、「在庫読込」を押してください。</p>`;
+    updateSettlementTotals();
+  }
+
+  function render() {
+    renderSelects();
+    renderDashboard();
+    renderPartners();
+    renderProducts();
+    renderDeliveryHistory();
+    renderSettlementHistory();
+    renderInventory();
+    renderReports();
+    fillForm($("#settingsForm"), state.settings);
+  }
+
+  function renderSelects() {
+    const partnerOptions = `<option value="">選択してください</option>${state.partners.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}`;
+    $$("select[name='partnerId']").forEach((select) => {
+      const current = select.value;
+      select.innerHTML = partnerOptions;
+      select.value = current;
+    });
+  }
+
+  function renderDashboard() {
+    const inventory = getInventory();
+    const totalStock = inventory.reduce((sum, row) => sum + row.qty, 0);
+    const stockValue = inventory.reduce((sum, row) => sum + row.qty * (row.product?.price || 0), 0);
+    $("#statPartners").textContent = number(state.partners.length);
+    $("#statProducts").textContent = number(state.products.length);
+    $("#statInventory").textContent = number(totalStock);
+    $("#statRevenue").textContent = yen(stockValue);
+
+    const recent = [...state.settlements].slice(-5).reverse();
+    $("#recentSettlements").innerHTML = recent.length ? recent.map((s) => `
+      <div class="list-item">
+        <div><strong>${esc(partnerName(s.partnerId))}</strong><br><span class="muted">${esc(s.date)} / ${esc(s.invoiceNumber)}</span></div>
+        <strong>${yen(s.totals.total)}</strong>
+      </div>
+    `).join("") : `<p class="muted">まだ精算履歴がありません。</p>`;
+
+    const byPartner = groupBy(inventory, "partnerId").map(([partnerId, rows]) => ({
+      partnerId,
+      qty: rows.reduce((sum, row) => sum + row.qty, 0),
+      value: rows.reduce((sum, row) => sum + row.qty * (row.product?.price || 0), 0)
+    })).sort((a, b) => b.qty - a.qty);
+    $("#partnerInventorySummary").innerHTML = byPartner.length ? byPartner.map((row) => `
+      <div class="list-item">
+        <div><strong>${esc(partnerName(row.partnerId))}</strong><br><span class="muted">預け在庫 ${number(row.qty)} 点</span></div>
+        <strong>${yen(row.value)}</strong>
+      </div>
+    `).join("") : `<p class="muted">在庫はまだ登録されていません。</p>`;
+  }
+
+  function renderPartners() {
+    const q = $("#partnerSearch").value.trim().toLowerCase();
+    const rows = state.partners.filter((p) => [p.name, p.person, p.phone, p.email].join(" ").toLowerCase().includes(q));
+    $("#partnerList").innerHTML = table(["取引先名", "担当", "電話", "手数料/掛率", "前回精算", ""], rows.map((p) => {
+      const latest = [...state.settlements].reverse().find((s) => s.partnerId === p.id);
+      return [
+        `<strong>${esc(p.name)}</strong><br><span class="muted">${nl(p.address)}</span>`,
+        esc(p.person),
+        esc(p.phone),
+        `${p.commissionRate ? `${esc(p.commissionRate)}%` : "-"} / ${p.wholesaleRate ? `${esc(p.wholesaleRate)}%` : "-"}`,
+        latest ? `${esc(latest.date)}<br>${yen(latest.totals.total)}` : "-",
+        actions("partner", p.id)
+      ];
+    }));
+  }
+
+  function renderProducts() {
+    const q = $("#productSearch").value.trim().toLowerCase();
+    const rows = state.products.filter((p) => [p.sku, p.name, p.category].join(" ").toLowerCase().includes(q));
+    $("#productList").innerHTML = table(["商品ID", "商品名", "カテゴリ", "販売価格", "税区分", ""], rows.map((p) => [
+      esc(p.sku),
+      `${p.image ? `<img src="${p.image}" alt="" style="width:42px;height:42px;object-fit:cover;border-radius:6px;margin-right:8px;vertical-align:middle">` : ""}<strong>${esc(p.name)}</strong>`,
+      esc(p.category),
+      yen(p.price),
+      taxNames[p.taxType] || "",
+      actions("product", p.id)
+    ]));
+  }
+
+  function renderDeliveryHistory() {
+    const rows = [...state.deliveries].reverse();
+    $("#deliveryHistory").innerHTML = table(["納品日", "番号", "取引先", "内容", "合計", ""], rows.map((d) => [
+      esc(d.date),
+      esc(d.number),
+      esc(partnerName(d.partnerId)),
+      d.lines.map((line) => `${esc(productName(line.productId))} x ${number(line.qty)}`).join("<br>"),
+      yen(d.lines.reduce((sum, line) => sum + line.qty * line.unitPrice, 0)),
+      `<div class="row-actions"><button class="icon-action" data-print-delivery="${d.id}">印刷</button><button class="icon-action danger" data-delete-delivery="${d.id}">削除</button></div>`
+    ]));
+  }
+
+  function renderSettlementHistory() {
+    const rows = [...state.settlements].reverse();
+    $("#settlementHistory").innerHTML = table(["精算日", "請求書番号", "取引先", "期間", "販売数", "合計請求額", ""], rows.map((s) => [
+      esc(s.date),
+      esc(s.invoiceNumber),
+      esc(partnerName(s.partnerId)),
+      `${esc(s.periodStart || "")} - ${esc(s.periodEnd || "")}`,
+      number(s.lines.reduce((sum, line) => sum + line.soldQty, 0)),
+      yen(s.totals.total),
+      `<div class="row-actions"><button class="icon-action" data-print-settlement="${s.id}">印刷</button><button class="icon-action danger" data-delete-settlement="${s.id}">削除</button></div>`
+    ]));
+  }
+
+  function renderInventory() {
+    const rows = getInventory();
+    if (inventoryMode === "product") {
+      const grouped = groupBy(rows, "productId").map(([productId, items]) => [
+        esc(productName(productId)),
+        items.map((item) => `${esc(partnerName(item.partnerId))}: ${number(item.qty)}`).join("<br>"),
+        number(items.reduce((sum, item) => sum + item.qty, 0)),
+        yen(items.reduce((sum, item) => sum + item.qty * (item.product?.price || 0), 0))
+      ]);
+      $("#inventoryTable").innerHTML = table(["商品", "所在", "現在残数", "販売価格換算"], grouped);
+      return;
+    }
+
+    if (inventoryMode === "stale") {
+      const staleRows = rows
+        .map((row) => ({ ...row, days: daysSince(lastMovementDate(row.partnerId, row.productId)) }))
+        .sort((a, b) => b.days - a.days)
+        .map((row) => [esc(partnerName(row.partnerId)), esc(productName(row.productId)), number(row.qty), `${number(row.days)}日`, esc(lastMovementDate(row.partnerId, row.productId) || "-")]);
+      $("#inventoryTable").innerHTML = table(["取引先", "商品", "現在残数", "最終移動から", "最終移動日"], staleRows);
+      return;
+    }
+
+    $("#inventoryTable").innerHTML = table(["取引先", "商品", "現在残数", "販売価格", "販売価格換算"], rows.map((row) => [
+      esc(partnerName(row.partnerId)),
+      esc(productName(row.productId)),
+      number(row.qty),
+      yen(row.product?.price || 0),
+      yen(row.qty * (row.product?.price || 0))
+    ]));
+  }
+
+  function renderReports() {
+    const allLines = state.settlements.flatMap((s) => s.lines.map((line) => ({ ...line, partnerId: s.partnerId })));
+    const gross = state.settlements.reduce((sum, s) => sum + s.totals.gross, 0);
+    const total = state.settlements.reduce((sum, s) => sum + s.totals.total, 0);
+    const units = allLines.reduce((sum, line) => sum + line.soldQty, 0);
+    const commission = state.settlements.reduce((sum, s) => sum + s.totals.commission, 0);
+    $("#reportGross").textContent = yen(gross);
+    $("#reportTotal").textContent = yen(total);
+    $("#reportUnits").textContent = number(units);
+    $("#reportRate").textContent = gross ? `${Math.round((commission / gross) * 1000) / 10}%` : "0%";
+
+    const partnerRows = groupBy(allLines, "partnerId").map(([partnerId, rows]) => [
+      esc(partnerName(partnerId)),
+      number(rows.reduce((sum, line) => sum + line.soldQty, 0)),
+      yen(rows.reduce((sum, line) => sum + line.gross, 0)),
+      yen(rows.reduce((sum, line) => sum + line.total, 0))
+    ]);
+    $("#partnerSales").innerHTML = table(["取引先", "販売数", "販売金額", "請求額"], partnerRows);
+
+    const productRows = groupBy(allLines, "productId").map(([productId, rows]) => [
+      esc(productName(productId)),
+      number(rows.reduce((sum, line) => sum + line.soldQty, 0)),
+      yen(rows.reduce((sum, line) => sum + line.gross, 0)),
+      yen(rows.reduce((sum, line) => sum + line.total, 0))
+    ]);
+    $("#productSales").innerHTML = table(["商品", "販売数", "販売金額", "請求額"], productRows);
+  }
+
+  function table(headers, rows) {
+    if (!rows.length) return `<p class="muted">表示するデータがありません。</p>`;
+    return `<table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell, index) => `<td class="${typeof cell === "number" || index > 1 && String(cell).startsWith("¥") ? "numeric" : ""}">${cell}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  }
+
+  function actions(type, id) {
+    return `<div class="row-actions"><button class="icon-action" data-edit-${type}="${id}">編集</button><button class="icon-action danger" data-delete-${type}="${id}">削除</button></div>`;
+  }
+
+  function groupBy(rows, key) {
+    const map = new Map();
+    rows.forEach((row) => {
+      const value = row[key];
+      if (!map.has(value)) map.set(value, []);
+      map.get(value).push(row);
+    });
+    return Array.from(map.entries());
+  }
+
+  function getInventory(untilSettlementId = null) {
+    const qty = new Map();
+    const add = (partnerId, productId, amount) => {
+      const key = `${partnerId}::${productId}`;
+      qty.set(key, (qty.get(key) || 0) + Number(amount || 0));
+    };
+
+    state.deliveries.forEach((delivery) => {
+      delivery.lines.forEach((line) => add(delivery.partnerId, line.productId, line.qty));
+    });
+
+    for (const settlement of state.settlements) {
+      if (untilSettlementId && settlement.id === untilSettlementId) break;
+      settlement.lines.forEach((line) => {
+        add(settlement.partnerId, line.productId, Number(line.deliveredQty || 0) - Number(line.soldQty || 0) - Number(line.returnedQty || 0));
+      });
+    }
+
+    return Array.from(qty.entries()).map(([key, amount]) => {
+      const [partnerId, productId] = key.split("::");
+      return { partnerId, productId, product: productById(productId), qty: amount };
+    }).filter((row) => row.qty > 0);
+  }
+
+  function lastMovementDate(partnerId, productId) {
+    const dates = [];
+    state.deliveries.forEach((d) => {
+      if (d.partnerId === partnerId && d.lines.some((line) => line.productId === productId)) dates.push(d.date);
+    });
+    state.settlements.forEach((s) => {
+      if (s.partnerId === partnerId && s.lines.some((line) => line.productId === productId)) dates.push(s.date);
+    });
+    return dates.sort().at(-1);
+  }
+
+  function daysSince(date) {
+    if (!date) return 0;
+    return Math.max(0, Math.floor((new Date(today()) - new Date(date)) / 86400000));
+  }
+
+  function addDeliveryLine(line = {}) {
+    const row = document.createElement("div");
+    row.className = "entry-line";
+    row.innerHTML = `
+      <label>商品<select name="productId" required>${productOptions(line.productId)}</select></label>
+      <label>数量<input name="qty" type="number" min="1" step="1" value="${esc(line.qty || 1)}" required></label>
+      <label>単価<input name="unitPrice" type="number" min="0" step="1" value="${esc(line.unitPrice || "")}"></label>
+      <label>備考<input name="notes" value="${esc(line.notes || "")}"></label>
+      <button type="button" class="icon-action danger" data-remove-line>削除</button>
+    `;
+    $("#deliveryLines").appendChild(row);
+    row.querySelector("select").addEventListener("change", () => {
+      const product = productById(row.querySelector("select").value);
+      row.querySelector("input[name='unitPrice']").value = product?.price || "";
+    });
+  }
+
+  function productOptions(selected = "") {
+    return `<option value="">選択</option>${state.products.map((p) => `<option value="${p.id}" ${p.id === selected ? "selected" : ""}>${esc(p.name)} / ${yen(p.price)}</option>`).join("")}`;
+  }
+
+  function buildSettlementLines() {
+    const form = $("#settlementForm");
+    const partnerId = form.elements.partnerId.value;
+    if (!partnerId) {
+      toast("取引先を選択してください。");
+      return;
+    }
+    const inventory = getInventory().filter((row) => row.partnerId === partnerId);
+    if (!inventory.length) {
+      $("#settlementLines").innerHTML = `<p class="muted">この取引先の預け在庫はありません。</p>`;
+      updateSettlementTotals();
+      return;
+    }
+    $("#settlementLines").innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>商品</th><th class="numeric">前回残数</th><th class="numeric">今回納品</th><th class="numeric">販売数</th><th class="numeric">返品数</th><th class="numeric">今回残数</th><th class="numeric">販売価格</th><th class="numeric">請求額</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${inventory.map((row) => settlementLineHtml(row)).join("")}
+        </tbody>
+      </table>
+    `;
+    updateSettlementTotals();
+  }
+
+  function settlementLineHtml(row) {
+    const product = row.product || {};
+    return `
+      <tr data-product-id="${esc(row.productId)}" data-prev="${row.qty}" data-price="${Number(product.price || 0)}">
+        <td>${esc(product.name || "未登録")}</td>
+        <td class="numeric">${number(row.qty)}</td>
+        <td><input data-field="deliveredQty" type="number" min="0" step="1" value="0"></td>
+        <td><input data-field="soldQty" type="number" min="0" step="1" value="0"></td>
+        <td><input data-field="returnedQty" type="number" min="0" step="1" value="0"></td>
+        <td class="numeric" data-remain>${number(row.qty)}</td>
+        <td class="numeric">${yen(product.price || 0)}</td>
+        <td class="numeric" data-line-total>${yen(0)}</td>
+      </tr>
+    `;
+  }
+
+  function lineCommissionRate(product, partner) {
+    if (product?.wholesaleRate) return 100 - Number(product.wholesaleRate);
+    if (partner?.wholesaleRate) return 100 - Number(partner.wholesaleRate);
+    if (product?.commissionRate) return Number(product.commissionRate);
+    if (partner?.commissionRate) return Number(partner.commissionRate);
+    return 0;
+  }
+
+  function calculateLine(product, partner, values) {
+    const price = Number(product?.price || values.unitPrice || 0);
+    const soldQty = Number(values.soldQty || 0);
+    const gross = price * soldQty;
+    const commissionRate = lineCommissionRate(product, partner);
+    const commission = Math.round(gross * commissionRate / 100);
+    const subtotal = gross - commission;
+    const taxRate = product ? taxRates[product.taxType] ?? Number(state.settings.taxRate || 10) : Number(state.settings.taxRate || 10);
+    const tax = Math.round(subtotal * taxRate / 100);
+    const total = subtotal + tax;
+    return { price, gross, commissionRate, commission, subtotal, taxRate, tax, total };
+  }
+
+  function updateSettlementTotals() {
+    const form = $("#settlementForm");
+    const partner = partnerById(form.elements.partnerId.value);
+    const rows = $$("#settlementLines tbody tr");
+    const totals = { gross: 0, commission: 0, tax: 0, total: 0 };
+    rows.forEach((tr) => {
+      const product = productById(tr.dataset.productId);
+      const prev = Number(tr.dataset.prev || 0);
+      const deliveredQty = Number($("[data-field='deliveredQty']", tr).value || 0);
+      const soldQty = Number($("[data-field='soldQty']", tr).value || 0);
+      const returnedQty = Number($("[data-field='returnedQty']", tr).value || 0);
+      const remain = prev + deliveredQty - soldQty - returnedQty;
+      const calc = calculateLine(product, partner, { soldQty });
+      $("[data-remain]", tr).textContent = number(remain);
+      $("[data-line-total]", tr).textContent = yen(calc.total);
+      totals.gross += calc.gross;
+      totals.commission += calc.commission;
+      totals.tax += calc.tax;
+      totals.total += calc.total;
+    });
+    $("#settleGross").textContent = yen(totals.gross);
+    $("#settleCommission").textContent = yen(totals.commission);
+    $("#settleTax").textContent = yen(totals.tax);
+    $("#settleTotal").textContent = yen(totals.total);
+    return totals;
+  }
+
+  function collectSettlementLines() {
+    const form = $("#settlementForm");
+    const partner = partnerById(form.elements.partnerId.value);
+    return $$("#settlementLines tbody tr").map((tr) => {
+      const product = productById(tr.dataset.productId);
+      const prevQty = Number(tr.dataset.prev || 0);
+      const deliveredQty = Number($("[data-field='deliveredQty']", tr).value || 0);
+      const soldQty = Number($("[data-field='soldQty']", tr).value || 0);
+      const returnedQty = Number($("[data-field='returnedQty']", tr).value || 0);
+      const calc = calculateLine(product, partner, { soldQty });
+      return {
+        productId: tr.dataset.productId,
+        prevQty,
+        deliveredQty,
+        soldQty,
+        returnedQty,
+        remainQty: prevQty + deliveredQty - soldQty - returnedQty,
+        ...calc
+      };
+    }).filter((line) => line.deliveredQty || line.soldQty || line.returnedQty);
+  }
+
+  function printDelivery(id) {
+    const delivery = state.deliveries.find((d) => d.id === id);
+    if (!delivery) return;
+    state.lastDocument = { type: "delivery", id };
+    saveState();
+    const partner = partnerById(delivery.partnerId) || {};
+    $("#printArea").innerHTML = `
+      <article class="document">
+        <div class="doc-head">
+          <div>
+            <h1 class="doc-title">委託販売納品書</h1>
+            <p>${esc(partner.name || "")} 御中</p>
+          </div>
+          <div class="doc-meta">
+            <div>納品日: ${esc(delivery.date)}</div>
+            <div>納品書番号: ${esc(delivery.number)}</div>
+            <div>${nl(state.settings.companyName)}</div>
+            <div>${nl(state.settings.companyAddress)}</div>
+            <div>${esc(state.settings.companyPhone)}</div>
+          </div>
+        </div>
+        <table class="doc-table">
+          <thead><tr><th>商品名</th><th>数量</th><th>販売価格</th><th>備考</th></tr></thead>
+          <tbody>${delivery.lines.map((line) => `<tr><td>${esc(productName(line.productId))}</td><td class="numeric">${number(line.qty)}</td><td class="numeric">${yen(line.unitPrice)}</td><td>${esc(line.notes)}</td></tr>`).join("")}</tbody>
+        </table>
+        <div class="doc-note">${nl(delivery.notes || state.settings.documentNote || "")}</div>
+      </article>
+    `;
+    window.print();
+  }
+
+  function printSettlement(id) {
+    const settlement = state.settlements.find((s) => s.id === id);
+    if (!settlement) return;
+    state.lastDocument = { type: "settlement", id };
+    saveState();
+    const partner = partnerById(settlement.partnerId) || {};
+    $("#printArea").innerHTML = `
+      <article class="document">
+        <div class="doc-head">
+          <div>
+            <h1 class="doc-title">委託販売精算書 兼 請求書</h1>
+            <p>${esc(partner.name || "")} 御中</p>
+            <p>${esc(settlement.periodStart || "")} - ${esc(settlement.periodEnd || "")}</p>
+          </div>
+          <div class="doc-meta">
+            <div>精算日: ${esc(settlement.date)}</div>
+            <div>精算書番号: ${esc(settlement.settlementNumber)}</div>
+            <div>請求書番号: ${esc(settlement.invoiceNumber)}</div>
+            <div>登録番号: ${esc(state.settings.invoiceRegistration)}</div>
+            <br>
+            <div>${nl(state.settings.companyName)}</div>
+            <div>${nl(state.settings.companyAddress)}</div>
+            <div>${esc(state.settings.companyPhone)}</div>
+          </div>
+        </div>
+        <div class="doc-total">合計請求額 ${yen(settlement.totals.total)}</div>
+        <table class="doc-table">
+          <thead>
+            <tr><th>商品名</th><th>前回残</th><th>今回納品</th><th>販売数</th><th>返品数</th><th>今回残</th><th>販売価格</th><th>販売金額</th><th>手数料</th><th>消費税</th><th>請求額</th></tr>
+          </thead>
+          <tbody>
+            ${settlement.lines.map((line) => `<tr>
+              <td>${esc(productName(line.productId))}</td>
+              <td class="numeric">${number(line.prevQty)}</td>
+              <td class="numeric">${number(line.deliveredQty)}</td>
+              <td class="numeric">${number(line.soldQty)}</td>
+              <td class="numeric">${number(line.returnedQty)}</td>
+              <td class="numeric">${number(line.remainQty)}</td>
+              <td class="numeric">${yen(line.price)}</td>
+              <td class="numeric">${yen(line.gross)}</td>
+              <td class="numeric">${yen(line.commission)}</td>
+              <td class="numeric">${yen(line.tax)}</td>
+              <td class="numeric">${yen(line.total)}</td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+        <div class="doc-parties">
+          <div><strong>お支払条件</strong><br>${nl(partner.paymentTerms || "")}</div>
+          <div><strong>振込先</strong><br>${nl(state.settings.bankInfo || "")}</div>
+        </div>
+        <div class="doc-note">${nl(settlement.notes || state.settings.documentNote || "")}</div>
+      </article>
+    `;
+    window.print();
+  }
+
+  function seedData() {
+    if (state.partners.length || state.products.length || state.deliveries.length || state.settlements.length) {
+      if (!confirm("現在のデータにサンプルを追加します。よろしいですか？")) return;
+    }
+    const p1 = { id: uid("partner"), name: "山あい旅館 売店", person: "田中様", address: "長野県松本市", phone: "0263-00-0000", email: "", closingDay: "末日", paymentTerms: "翌月末振込", commissionRate: 30, wholesaleRate: "", notes: "" };
+    const p2 = { id: uid("partner"), name: "川辺ギャラリー", person: "佐藤様", address: "岐阜県高山市", phone: "0577-00-0000", email: "", closingDay: "20日", paymentTerms: "翌月20日振込", commissionRate: 25, wholesaleRate: "", notes: "" };
+    const a = { id: uid("product"), sku: "CRA-001", name: "手染め小皿", category: "陶器", price: 3200, taxType: "taxable", cost: 1200, commissionRate: "", wholesaleRate: "", image: "", notes: "" };
+    const b = { id: uid("product"), sku: "CRA-002", name: "木工箸置き", category: "木工", price: 1200, taxType: "taxable", cost: 420, commissionRate: "", wholesaleRate: "", image: "", notes: "" };
+    state.partners.push(p1, p2);
+    state.products.push(a, b);
+    state.deliveries.push({
+      id: uid("delivery"),
+      date: today(),
+      partnerId: p1.id,
+      number: serial("DN", state.deliveries),
+      notes: "初回委託納品",
+      lines: [
+        { productId: a.id, qty: 8, unitPrice: a.price, notes: "" },
+        { productId: b.id, qty: 20, unitPrice: b.price, notes: "" }
+      ]
+    });
+    if (!state.settings.companyName) {
+      state.settings.companyName = "法顕堂";
+      state.settings.companyAddress = "住所を設定してください";
+      state.settings.taxRate = 10;
+      state.settings.bankInfo = "銀行名 支店名 普通 0000000";
+      state.settings.documentNote = "毎度ありがとうございます。";
+    }
+    saveState();
+    render();
+    resetDeliveryForm();
+    resetSettlementForm();
+    toast("サンプルデータを追加しました。");
+  }
+
+  function wireEvents() {
+    $$(".nav-item, [data-view-link]").forEach((button) => {
+      button.addEventListener("click", () => showView(button.dataset.view || button.dataset.viewLink));
+    });
+
+    $("#partnerForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const data = formData(event.currentTarget);
+      const item = { ...data, commissionRate: Number(data.commissionRate || 0), wholesaleRate: Number(data.wholesaleRate || 0) || "" };
+      if (data.id) state.partners = state.partners.map((p) => p.id === data.id ? item : p);
+      else state.partners.push({ ...item, id: uid("partner") });
+      saveState();
+      resetPartnerForm();
+      render();
+      toast("取引先を保存しました。");
+    });
+
+    $("#productForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const data = formData(event.currentTarget);
+      const existing = state.products.find((p) => p.id === data.id);
+      const item = {
+        ...data,
+        price: Number(data.price || 0),
+        cost: Number(data.cost || 0),
+        commissionRate: Number(data.commissionRate || 0) || "",
+        wholesaleRate: Number(data.wholesaleRate || 0) || "",
+        image: productImageDraft || existing?.image || ""
+      };
+      if (data.id) state.products = state.products.map((p) => p.id === data.id ? item : p);
+      else state.products.push({ ...item, id: uid("product") });
+      saveState();
+      resetProductForm();
+      render();
+      resetDeliveryForm();
+      toast("商品を保存しました。");
+    });
+
+    $("#productForm").elements.image.addEventListener("change", (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        productImageDraft = reader.result;
+        $("#productImagePreview").src = productImageDraft;
+        $("#productImagePreview").style.display = "block";
+      };
+      reader.readAsDataURL(file);
+    });
+
+    $("#deliveryForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const lines = $$("#deliveryLines .entry-line").map((row) => ({
+        productId: $("select[name='productId']", row).value,
+        qty: Number($("input[name='qty']", row).value || 0),
+        unitPrice: Number($("input[name='unitPrice']", row).value || 0) || (productById($("select[name='productId']", row).value)?.price || 0),
+        notes: $("input[name='notes']", row).value
+      })).filter((line) => line.productId && line.qty > 0);
+      if (!lines.length) return toast("納品する商品を入力してください。");
+      const data = formData(form);
+      const delivery = { id: uid("delivery"), ...data, lines };
+      state.deliveries.push(delivery);
+      state.lastDocument = { type: "delivery", id: delivery.id };
+      saveState();
+      render();
+      resetDeliveryForm();
+      toast("納品を登録しました。印刷できます。");
+    });
+
+    $("#settlementForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const data = formData(event.currentTarget);
+      const lines = collectSettlementLines();
+      if (!lines.length) return toast("販売数、返品数、または今回納品数を入力してください。");
+      if (lines.some((line) => line.remainQty < 0)) return toast("今回残数がマイナスの行があります。");
+      const totals = lines.reduce((sum, line) => {
+        sum.gross += line.gross;
+        sum.commission += line.commission;
+        sum.tax += line.tax;
+        sum.total += line.total;
+        return sum;
+      }, { gross: 0, commission: 0, tax: 0, total: 0 });
+      const settlement = { id: uid("settlement"), ...data, lines, totals };
+      state.settlements.push(settlement);
+      state.lastDocument = { type: "settlement", id: settlement.id };
+      saveState();
+      render();
+      resetSettlementForm();
+      toast("精算を登録しました。請求書を印刷できます。");
+    });
+
+    $("#settingsForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const previousClientId = oneDriveClientId();
+      const data = formData(event.currentTarget);
+      state.settings = { ...state.settings, ...data };
+      state.settings.taxRate = Number(state.settings.taxRate || 10);
+      state.settings.oneDriveAutoSync = event.currentTarget.elements.oneDriveAutoSync.checked;
+      state.settings.oneDriveFileName = state.settings.oneDriveFileName || "委託販売管理_台帳.json";
+      if (previousClientId !== oneDriveClientId()) {
+        msalApp = null;
+        msalClientId = "";
+        oneDriveFileETag = "";
+        localStorage.removeItem(ONEDRIVE_ETAG_KEY);
+        setOneDriveStatus("OneDrive: 未接続", "warning");
+      }
+      saveState();
+      toast("設定を保存しました。");
+    });
+
+    $("#addDeliveryLine").addEventListener("click", () => addDeliveryLine());
+    $("#buildSettlement").addEventListener("click", buildSettlementLines);
+    $("#resetDelivery").addEventListener("click", resetDeliveryForm);
+    $("#resetSettlement").addEventListener("click", resetSettlementForm);
+    $("#partnerSearch").addEventListener("input", renderPartners);
+    $("#productSearch").addEventListener("input", renderProducts);
+    $("#seedData").addEventListener("click", seedData);
+    $("#showGuide").addEventListener("click", () => showOnboarding(true));
+    $("#connectOneDrive").addEventListener("click", signInOneDrive);
+    $("#loadOneDrive").addEventListener("click", loadLedgerFromOneDrive);
+    $("#saveOneDrive").addEventListener("click", () => saveLedgerToOneDrive(true, true));
+    $("#chooseAutoSaveFile").addEventListener("click", chooseAutoSaveFile);
+    $("#openLedgerFile").addEventListener("click", openLedgerFile);
+    $("#setupAutoSaveFile").addEventListener("click", chooseAutoSaveFile);
+    $("#dismissSetupPrompt").addEventListener("click", () => {
+      localStorage.setItem(SETUP_DISMISSED_KEY, "1");
+      updateSetupPrompt();
+    });
+    $("#closeOnboarding").addEventListener("click", () => closeOnboarding(false));
+    $("#skipOnboarding").addEventListener("click", () => closeOnboarding(true));
+    $("#prevOnboarding").addEventListener("click", prevOnboarding);
+    $("#nextOnboarding").addEventListener("click", nextOnboarding);
+    $("#printCurrent").addEventListener("click", () => {
+      const doc = state.lastDocument || (state.settlements.at(-1) ? { type: "settlement", id: state.settlements.at(-1).id } : null);
+      if (!doc) return toast("印刷できる帳票がまだありません。");
+      if (doc.type === "delivery") printDelivery(doc.id);
+      if (doc.type === "settlement") printSettlement(doc.id);
+    });
+
+    $("#exportData").addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `委託販売管理バックアップ_${today()}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    $("#importData").addEventListener("change", (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          state = normalizeState(JSON.parse(reader.result));
+          saveState();
+          render();
+          resetDeliveryForm();
+          resetSettlementForm();
+          toast("データを読み込みました。");
+        } catch {
+          toast("JSONを読み込めませんでした。");
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    document.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.matches("[data-reset-form]")) {
+        target.dataset.resetForm === "partnerForm" ? resetPartnerForm() : resetProductForm();
+      }
+      if (target.matches("[data-remove-line]")) target.closest(".entry-line")?.remove();
+      if (target.dataset.editPartner) editPartner(target.dataset.editPartner);
+      if (target.dataset.editProduct) editProduct(target.dataset.editProduct);
+      if (target.dataset.deletePartner) deleteItem("partners", target.dataset.deletePartner, "取引先");
+      if (target.dataset.deleteProduct) deleteItem("products", target.dataset.deleteProduct, "商品");
+      if (target.dataset.deleteDelivery) deleteItem("deliveries", target.dataset.deleteDelivery, "納品");
+      if (target.dataset.deleteSettlement) deleteItem("settlements", target.dataset.deleteSettlement, "精算");
+      if (target.dataset.printDelivery) printDelivery(target.dataset.printDelivery);
+      if (target.dataset.printSettlement) printSettlement(target.dataset.printSettlement);
+      if (target.dataset.inventoryMode) {
+        inventoryMode = target.dataset.inventoryMode;
+        $$("[data-inventory-mode]").forEach((b) => b.classList.toggle("active", b === target));
+        renderInventory();
+      }
+    });
+
+    document.addEventListener("input", (event) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.matches("#settlementLines input")) updateSettlementTotals();
+    });
+  }
+
+  function showView(id) {
+    $$(".view").forEach((view) => view.classList.toggle("active", view.id === id));
+    $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === id));
+    $("#viewTitle").textContent = $(`.nav-item[data-view="${id}"]`)?.textContent || "ホーム";
+  }
+
+  function editPartner(id) {
+    const item = state.partners.find((p) => p.id === id);
+    if (!item) return;
+    fillForm($("#partnerForm"), item);
+    showView("partners");
+  }
+
+  function editProduct(id) {
+    const item = state.products.find((p) => p.id === id);
+    if (!item) return;
+    fillForm($("#productForm"), item);
+    productImageDraft = item.image || "";
+    $("#productImagePreview").src = item.image || "";
+    $("#productImagePreview").style.display = item.image ? "block" : "none";
+    showView("products");
+  }
+
+  function deleteItem(collection, id, label) {
+    if (!confirm(`${label}を削除します。よろしいですか？`)) return;
+    state[collection] = state[collection].filter((item) => item.id !== id);
+    saveState();
+    render();
+    resetDeliveryForm();
+    resetSettlementForm();
+    toast(`${label}を削除しました。`);
+  }
+
+  async function init() {
+    wireEvents();
+    render();
+    resetPartnerForm();
+    resetProductForm();
+    resetDeliveryForm();
+    resetSettlementForm();
+    updateSetupPrompt();
+    showOnboarding();
+    initAutoSaveFile().then(() => {
+      render();
+      resetDeliveryForm();
+      resetSettlementForm();
+      updateSetupPrompt();
+    }).catch((error) => {
+      console.error(error);
+      setAutoSaveStatus("自動保存: 再設定が必要", "warning");
+      updateSetupPrompt();
+    });
+  }
+
+  init();
+})();
+
+
+
+
+
