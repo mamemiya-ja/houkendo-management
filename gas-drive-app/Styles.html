@@ -1022,11 +1022,12 @@ th.numeric {
 }
 
 
+
 @media (max-width: 980px), (hover: none) and (pointer: coarse) {
   body {
-    padding-bottom: calc(96px + env(safe-area-inset-bottom));
-    font-size: 16px;
-    line-height: 1.6;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+    font-size: 17px;
+    line-height: 1.65;
     -webkit-text-size-adjust: 100%;
   }
 
@@ -1038,27 +1039,56 @@ th.numeric {
   .sidebar {
     position: static;
     display: grid;
-    gap: 10px;
-    padding: 10px 12px 8px;
+    gap: 8px;
+    padding: 12px 14px 10px;
   }
 
   .brand {
-    gap: 9px;
+    gap: 10px;
+    min-height: 40px;
   }
 
   .brand-mark {
-    width: 36px;
-    height: 36px;
-    font-size: 16px;
-    border-radius: 7px;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 auto;
+    font-size: 17px;
+    border-radius: 8px;
   }
 
   .brand h1 {
-    font-size: 16px;
+    font-size: 17px;
+    line-height: 1.2;
   }
 
-  .brand p {
-    font-size: 11px;
+  .brand p,
+  .eyebrow {
+    display: none;
+  }
+
+  .side-actions {
+    display: block;
+    margin-top: 0;
+  }
+
+  .side-actions > * {
+    display: none !important;
+  }
+
+  .side-actions #googleDriveStatus,
+  .side-actions #autoSaveStatus,
+  .side-actions #oneDriveStatus {
+    display: flex !important;
+    align-items: center;
+    width: 100%;
+    min-height: 34px;
+    padding: 7px 10px;
+    overflow: hidden;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .nav {
@@ -1067,21 +1097,32 @@ th.numeric {
     bottom: 0;
     left: 0;
     z-index: 30;
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 4px;
-    padding: 7px 8px calc(7px + env(safe-area-inset-bottom));
+    display: flex;
+    gap: 8px;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+    overflow-x: auto;
     background: rgba(30, 43, 38, 0.98);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
     box-shadow: 0 -14px 34px rgba(18, 29, 24, 0.22);
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
   }
 
   .nav-item {
-    min-height: 40px;
-    padding: 5px 2px;
-    border-radius: 8px;
-    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 92px;
+    min-height: 48px;
+    padding: 7px 8px;
+    border-radius: 10px;
+    font-size: 14px;
     font-weight: 700;
+    line-height: 1.2;
     text-align: center;
     white-space: nowrap;
     touch-action: manipulation;
@@ -1093,76 +1134,38 @@ th.numeric {
     border-color: transparent;
   }
 
-  .side-actions {
-    display: flex;
-    gap: 6px;
-    margin-top: 0;
-    padding-bottom: 2px;
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .side-actions::-webkit-scrollbar {
-    display: none;
-  }
-
-  .save-status,
-  .cloud-status,
-  .ghost-button {
-    flex: 0 0 auto;
-    min-height: 36px;
-    padding: 8px 10px;
-    border-radius: 8px;
-    font-size: 12px;
-    line-height: 1.35;
-    white-space: nowrap;
-  }
-
-  .save-status,
-  .cloud-status {
-    display: flex;
-    align-items: center;
-    max-width: calc(100vw - 24px);
-  }
-
-  .ghost-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: auto;
-    font-weight: 700;
-    text-align: center;
-    touch-action: manipulation;
-  }
-
   .workspace {
-    padding: 14px 12px 18px;
+    padding: 18px 14px 24px;
   }
 
   .topbar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: end;
+    grid-template-columns: 1fr;
+    align-items: stretch;
     gap: 10px;
     margin-bottom: 14px;
   }
 
   .topbar h2 {
-    font-size: 24px;
+    font-size: 28px;
     line-height: 1.2;
   }
 
   .top-actions {
-    display: flex;
-    align-items: center;
+    display: grid;
+    grid-template-columns: 1fr;
     gap: 8px;
-    width: auto;
+    width: 100%;
   }
 
-  .top-actions button {
-    width: auto;
-    min-width: 0;
+  #seedData {
+    display: none;
+  }
+
+  .top-actions button,
+  .form-actions button,
+  .setup-actions button {
+    width: 100%;
   }
 
   .primary-button,
@@ -1170,32 +1173,48 @@ th.numeric {
   .text-button,
   .icon-action,
   .segmented button {
-    min-height: 44px;
-    padding: 10px 13px;
-    font-size: 15px;
+    min-height: 48px;
+    padding: 11px 14px;
+    border-radius: 10px;
+    font-size: 16px;
     touch-action: manipulation;
   }
 
   .stats-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
   }
 
   .metric {
-    padding: 13px;
+    min-height: 104px;
+    padding: 18px;
   }
 
   .metric span {
-    font-size: 13px;
+    font-size: 15px;
   }
 
   .metric strong {
-    margin-top: 4px;
-    font-size: 25px;
+    margin-top: 6px;
+    font-size: 34px;
+    line-height: 1.15;
+  }
+
+  .two-column,
+  .split,
+  .form-row,
+  .form-row.wide,
+  .entry-line {
+    grid-template-columns: 1fr;
   }
 
   .panel {
-    padding: 14px 12px;
+    padding: 17px 14px;
+  }
+
+  .panel + .panel {
+    margin-top: 16px;
   }
 
   .panel-head {
@@ -1206,7 +1225,15 @@ th.numeric {
 
   .panel h3,
   .panel-head h3 {
-    font-size: 17px;
+    font-size: 18px;
+    line-height: 1.35;
+  }
+
+  .panel-head .text-button,
+  .panel-head > button {
+    width: auto;
+    min-width: 58px;
+    flex: 0 0 auto;
   }
 
   .search {
@@ -1214,23 +1241,45 @@ th.numeric {
     max-width: none;
   }
 
+  form {
+    gap: 15px;
+  }
+
   label {
-    font-size: 13px;
+    gap: 7px;
+    font-size: 14px;
   }
 
   input,
   select,
   textarea {
-    min-height: 46px;
-    padding: 11px 12px;
-    font-size: 16px;
+    min-height: 50px;
+    padding: 12px 13px;
+    font-size: 17px;
+  }
+
+  textarea {
+    min-height: 92px;
   }
 
   .form-actions,
   .setup-actions {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: 1fr;
+    gap: 9px;
+    width: 100%;
+  }
+
+  .entry-lines {
+    gap: 12px;
+  }
+
+  .entry-line {
+    gap: 12px;
+    padding: 13px;
+  }
+
+  .entry-line > button {
     width: 100%;
   }
 
@@ -1240,23 +1289,40 @@ th.numeric {
   }
 
   table {
-    min-width: 640px;
+    min-width: 700px;
   }
 
   th,
   td {
-    padding: 11px 10px;
+    padding: 12px 10px;
+    font-size: 15px;
+  }
+
+  th {
     font-size: 14px;
   }
 
+  .row-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
   .icon-action {
-    min-width: 44px;
+    min-width: 48px;
+  }
+
+  .editable-table input {
+    min-width: 92px;
+    min-height: 46px;
+    padding: 10px 11px;
+    font-size: 17px;
   }
 
   .totals {
     align-items: stretch;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
+    font-size: 16px;
   }
 
   .totals span {
@@ -1271,38 +1337,244 @@ th.numeric {
 
   .segmented {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 1fr;
     width: 100%;
   }
 
   .segmented button {
-    padding: 10px 8px;
-    font-size: 14px;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    font-size: 16px;
+  }
+
+  .segmented button:first-child {
+    border-top: 0;
+  }
+
+  .list-item {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 7px;
+    padding: 13px;
+    font-size: 16px;
+  }
+
+  .onboarding {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .onboarding-card {
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+    padding: 20px 17px;
+  }
+
+  .onboarding-card h2 {
+    font-size: 23px;
+  }
+
+  .onboarding-card p {
+    font-size: 16px;
   }
 
   #toast {
     right: 12px;
-    bottom: calc(104px + env(safe-area-inset-bottom));
+    bottom: calc(92px + env(safe-area-inset-bottom));
     left: 12px;
-    padding: 13px 14px;
-    font-size: 15px;
+    padding: 14px;
+    font-size: 16px;
     text-align: center;
   }
 }
 
-@media (max-width: 460px), (hover: none) and (pointer: coarse) {
+
+@media (max-width: 980px), (hover: none) and (pointer: coarse) {
+  body {
+    font-size: 20px;
+    line-height: 1.65;
+  }
+
+  .sidebar {
+    gap: 10px;
+    padding: 14px 14px 12px;
+  }
+
+  .brand-mark {
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+  }
+
+  .brand h1 {
+    font-size: 20px;
+  }
+
+  .side-actions #googleDriveStatus,
+  .side-actions #autoSaveStatus,
+  .side-actions #oneDriveStatus {
+    min-height: 42px;
+    padding: 10px 12px;
+    font-size: 15px;
+    line-height: 1.35;
+  }
+
+  .workspace {
+    padding: 22px 16px 30px;
+  }
+
   .topbar {
-    grid-template-columns: 1fr;
+    gap: 12px;
+    margin-bottom: 18px;
   }
 
+  .topbar h2 {
+    font-size: 36px;
+    line-height: 1.15;
+  }
+
+  .primary-button,
+  .secondary-button,
+  .text-button,
+  .icon-action,
+  .segmented button,
+  .ghost-button {
+    min-height: 60px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  .nav {
+    gap: 10px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .nav-item {
+    flex-basis: 118px;
+    min-height: 60px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-size: 18px;
+    line-height: 1.2;
+  }
+
+  .stats-grid {
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .metric {
+    min-height: 132px;
+    padding: 24px 22px;
+  }
+
+  .metric span {
+    font-size: 20px;
+    line-height: 1.35;
+  }
+
+  .metric strong {
+    margin-top: 8px;
+    font-size: 48px;
+    line-height: 1.1;
+  }
+
+  .panel {
+    padding: 24px 20px;
+  }
+
+  .panel + .panel {
+    margin-top: 20px;
+  }
+
+  .panel-head {
+    gap: 14px;
+  }
+
+  .panel h3,
+  .panel-head h3 {
+    font-size: 23px;
+    line-height: 1.35;
+  }
+
+  .panel-head .text-button,
+  .panel-head > button {
+    min-width: 72px;
+    min-height: 60px;
+    font-size: 18px;
+  }
+
+  .list,
+  .list-item,
+  .panel p,
+  .muted,
+  .field-help {
+    font-size: 20px;
+    line-height: 1.65;
+  }
+
+  label {
+    gap: 9px;
+    font-size: 18px;
+  }
+
+  input,
+  select,
+  textarea {
+    min-height: 62px;
+    padding: 15px 16px;
+    border-radius: 12px;
+    font-size: 20px;
+  }
+
+  textarea {
+    min-height: 112px;
+  }
+
+  .form-actions,
+  .setup-actions,
   .top-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 100%;
+    gap: 12px;
   }
 
-  .top-actions button {
-    width: 100%;
+  .entry-line {
+    gap: 14px;
+    padding: 16px;
+  }
+
+  th,
+  td {
+    padding: 15px 12px;
+    font-size: 18px;
+  }
+
+  th {
+    font-size: 17px;
+  }
+
+  .editable-table input {
+    min-width: 104px;
+    min-height: 58px;
+    padding: 13px 14px;
+    font-size: 20px;
+  }
+
+  .totals {
+    gap: 10px;
+    font-size: 20px;
+  }
+
+  .list-item {
+    gap: 10px;
+    padding: 18px;
+  }
+
+  #toast {
+    bottom: calc(102px + env(safe-area-inset-bottom));
+    padding: 16px;
+    font-size: 19px;
   }
 }
 
