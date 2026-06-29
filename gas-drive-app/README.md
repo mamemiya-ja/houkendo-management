@@ -1,10 +1,9 @@
-﻿# Google Apps Script + Google Drive版
+# Google Apps Script + Google Drive版
 
 PCとスマホで同じURLを開き、Google Drive上の台帳JSONを共有して使う版です。
 
 ## 何が違うか
 
-- OneDrive / Microsoft Entra のアプリ登録は不要です。
 - アプリは Google Apps Script のWebアプリとして動きます。
 - データは Google Drive の `委託販売管理アプリ` フォルダ内に `委託販売管理_台帳.json` として保存されます。
 - PCを常時起動する必要はありません。

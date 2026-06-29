@@ -1,4 +1,4 @@
-﻿# 委託販売管理・精算請求システム
+# 委託販売管理・精算請求システム
 
 委託販売先ごとの納品、預け在庫、販売数、返品数、精算金額、A4帳票印刷を管理するローカル用アプリです。
 
@@ -38,7 +38,7 @@ ChromeまたはEdgeで開いた場合、初回に `自動保存先設定` で選
 
 ## 注意
 
-ローカルファイル保存、OneDrive同期、Google Apps Script版、Supabaseクラウド同期版を用途に応じて選べます。入金管理、メール送信、本格的な複数事業者対応は将来拡張項目です。
+ローカルファイル保存、Google Apps Script版、Supabaseクラウド同期版を用途に応じて選べます。入金管理、メール送信、本格的な複数事業者対応は将来拡張項目です。
 
 
 ## GitHub Pages + Supabaseクラウド同期版
@@ -52,13 +52,6 @@ PCとスマホで同期して使う本命構成として、GitHub Pages + Supaba
 
 設定手順は [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md) を参照してください。
 
-## OneDrive同期について
-
-Microsoft Graph APIを使い、OneDriveのアプリ専用フォルダに台帳JSONを保存できるようにしました。PCとスマホで同じMicrosoftアカウントを使えば、同じ台帳を読み書きできます。
-
-利用には Microsoft Entra / Azure 側でアプリ登録を行い、アプリの `設定` 画面に Application (client) ID を入力する必要があります。詳しい手順は [docs/ONEDRIVE_GRAPH_SETUP.md](docs/ONEDRIVE_GRAPH_SETUP.md) を参照してください。
-
-`file://` で直接開いた場合、OneDrive同期は利用できません。GitHub PagesなどのHTTPS URL、または `localhost` で開いてください。
 
 ## GitHub管理について
 
@@ -68,4 +61,4 @@ GitHubで管理する場合は、台帳JSONやバックアップJSONをコミッ
 
 スマホとPCで同期して使うための簡易クラウド版を `gas-drive-app/` に追加しました。Google Apps ScriptのWebアプリとして公開し、台帳JSONをGoogle Driveに保存します。
 
-Microsoft Entra / OneDrive Graph API の設定が不要なので、個人利用ではこちらの方が始めやすい構成です。詳しい手順は [gas-drive-app/README.md](gas-drive-app/README.md) を参照してください。
+個人利用ではこちらの方が始めやすい構成です。詳しい手順は [gas-drive-app/README.md](gas-drive-app/README.md) を参照してください。

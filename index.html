@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
@@ -85,11 +85,7 @@
         <div id="supabaseStatus" class="cloud-status">クラウド: 未設定</div>
         <button id="openCloudPanel" class="ghost-button">ログイン/同期</button>
         <div id="autoSaveStatus" class="save-status">自動保存: 未設定</div>
-        <div id="oneDriveStatus" class="cloud-status">OneDrive: 未接続</div>
         <button id="showGuide" class="ghost-button">使い方ガイド</button>
-        <button id="connectOneDrive" class="ghost-button">OneDrive接続</button>
-        <button id="loadOneDrive" class="ghost-button">OneDriveから読込</button>
-        <button id="saveOneDrive" class="ghost-button">OneDriveへ保存</button>
         <button id="chooseAutoSaveFile" class="ghost-button">自動保存先設定</button>
         <button id="openLedgerFile" class="ghost-button">台帳ファイル読込</button>
         <button id="exportData" class="ghost-button">手動バックアップ</button>
@@ -354,14 +350,6 @@
           </div>
           <label>振込先<textarea name="bankInfo" rows="3"></textarea></label>
           <label>帳票備考<textarea name="documentNote" rows="2"></textarea></label>
-          <h3>OneDrive同期設定</h3>
-          <label>Microsoft アプリケーションID<input name="oneDriveClientId" placeholder="Azure / Entra の Application (client) ID"></label>
-          <label>OneDrive台帳ファイル名<input name="oneDriveFileName" placeholder="委託販売管理_台帳.json"></label>
-          <label class="checkbox-label">
-            <input name="oneDriveAutoSync" type="checkbox">
-            <span>保存時にOneDriveへ自動アップロードする</span>
-          </label>
-          <p class="field-help">OneDrive同期は、HTTPSで公開したURL、またはlocalhostで開いた場合に利用できます。権限は OneDrive のアプリ専用フォルダに限定します。</p>
           <div class="form-actions">
             <button class="primary-button">設定保存</button>
           </div>
@@ -391,7 +379,6 @@
   <div id="toast" role="status"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

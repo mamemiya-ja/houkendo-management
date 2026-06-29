@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   color-scheme: light;
   --bg: #f4f5f2;
   --surface: #ffffff;
@@ -1148,7 +1148,6 @@ th.numeric {
   .side-actions #supabaseStatus,
   .side-actions #googleDriveStatus,
   .side-actions #autoSaveStatus,
-  .side-actions #oneDriveStatus,
   .side-actions #openCloudPanel {
     display: flex !important;
     align-items: center;
@@ -1491,7 +1490,6 @@ th.numeric {
   .side-actions #supabaseStatus,
   .side-actions #googleDriveStatus,
   .side-actions #autoSaveStatus,
-  .side-actions #oneDriveStatus,
   .side-actions #openCloudPanel {
     min-height: 50px;
     padding: 12px 14px;

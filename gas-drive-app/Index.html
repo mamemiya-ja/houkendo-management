@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
@@ -36,11 +36,7 @@
         <button id="loadGoogleDrive" class="ghost-button">Google Driveから再読込</button>
         <button id="saveGoogleDrive" class="ghost-button">Google Driveへ保存</button>
         <div id="autoSaveStatus" class="save-status gas-hidden">自動保存: Google Drive</div>
-        <div id="oneDriveStatus" class="cloud-status gas-hidden">OneDrive: 未接続</div>
         <button id="showGuide" class="ghost-button">使い方ガイド</button>
-        <button id="connectOneDrive" class="ghost-button gas-hidden">OneDrive接続</button>
-        <button id="loadOneDrive" class="ghost-button gas-hidden">OneDriveから読込</button>
-        <button id="saveOneDrive" class="ghost-button gas-hidden">OneDriveへ保存</button>
         <button id="chooseAutoSaveFile" class="ghost-button gas-hidden">自動保存先設定</button>
         <button id="openLedgerFile" class="ghost-button gas-hidden">台帳ファイル読込</button>
         <button id="exportData" class="ghost-button">手動バックアップ</button>
@@ -304,7 +300,6 @@
           </div>
           <label>振込先<textarea name="bankInfo" rows="3"></textarea></label>
           <label>帳票備考<textarea name="documentNote" rows="2"></textarea></label>
-          <div class="gas-hidden"><input name="oneDriveClientId"><input name="oneDriveFileName"><input name="oneDriveAutoSync" type="checkbox"></div>
           <div class="form-actions">
             <button class="primary-button">設定保存</button>
           </div>

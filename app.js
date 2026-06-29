@@ -8,10 +8,7 @@
   const SETUP_DISMISSED_KEY = "consignment-ledger-setup-dismissed";
   const ONBOARDING_DONE_KEY = "consignment-ledger-onboarding-done";
   const ONBOARDING_VERSION = "2026-06-05";
-  const ONEDRIVE_ETAG_KEY = "consignment-ledger-onedrive-etag";
   const CLOUD_WORKSPACE_KEY = "consignment-ledger-cloud-workspace";
-  const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-  const GRAPH_SCOPES = ["Files.ReadWrite.AppFolder"];
   const taxRates = { taxable: 10, reduced: 8, exempt: 0 };
   const taxNames = { taxable: "課税10%", reduced: "軽減8%", exempt: "非課税" };
 
@@ -29,9 +26,6 @@
       taxRate: 10,
       bankInfo: "",
       documentNote: "",
-      oneDriveClientId: "",
-      oneDriveFileName: "委託販売管理_台帳.json",
-      oneDriveAutoSync: false
     },
     lastDocument: null
   };
@@ -44,12 +38,6 @@
   let fileSaveInProgress = false;
   let fileSaveQueued = false;
   let onboardingIndex = 0;
-  let msalApp = null;
-  let msalClientId = "";
-  let oneDriveFileETag = localStorage.getItem(ONEDRIVE_ETAG_KEY) || "";
-  let oneDriveSaveTimer = null;
-  let oneDriveSaveInProgress = false;
-  let oneDriveSaveQueued = false;
   let supabaseClient = null;
   let supabaseSession = null;
   let cloudWorkspaces = [];
@@ -119,7 +107,6 @@
   function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     queueFileSave();
-    queueOneDriveSave();
     queueSupabaseSave();
   }
 
@@ -363,186 +350,6 @@
       updateSetupPrompt();
     }
   }
-
-  function isOneDriveRuntimeSupported() {
-    return location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1";
-  }
-
-  function oneDriveClientId() {
-    return String(state.settings.oneDriveClientId || "").trim();
-  }
-
-  function oneDriveFileName() {
-    return String(state.settings.oneDriveFileName || "委託販売管理_台帳.json").trim() || "委託販売管理_台帳.json";
-  }
-
-  function oneDriveFileBaseUrl() {
-    return `${GRAPH_BASE}/me/drive/special/approot:/${encodeURIComponent(oneDriveFileName())}`;
-  }
-
-  function setOneDriveStatus(message, mode = "") {
-    const status = $("#oneDriveStatus");
-    if (!status) return;
-    status.textContent = message;
-    status.classList.toggle("ready", mode === "ready");
-    status.classList.toggle("warning", mode === "warning");
-    status.classList.toggle("error", mode === "error");
-  }
-
-  async function ensureMsalApp() {
-    const clientId = oneDriveClientId();
-    if (!clientId) throw new Error("Microsoft アプリケーションIDが未設定です。");
-    if (!isOneDriveRuntimeSupported()) throw new Error("OneDrive同期はHTTPSまたはlocalhostで開いた場合に利用できます。");
-    if (!window.msal) throw new Error("Microsoft認証ライブラリを読み込めませんでした。インターネット接続を確認してください。");
-    if (msalApp && msalClientId === clientId) return msalApp;
-    msalClientId = clientId;
-    msalApp = new msal.PublicClientApplication({
-      auth: {
-        clientId,
-        authority: "https://login.microsoftonline.com/common",
-        redirectUri: `${location.origin}${location.pathname}`
-      },
-      cache: { cacheLocation: "localStorage" }
-    });
-    return msalApp;
-  }
-
-  function activeOneDriveAccount(app) {
-    return app.getActiveAccount?.() || app.getAllAccounts()[0] || null;
-  }
-
-  async function signInOneDrive() {
-    try {
-      const app = await ensureMsalApp();
-      const result = await app.loginPopup({ scopes: GRAPH_SCOPES });
-      app.setActiveAccount(result.account);
-      setOneDriveStatus(`OneDrive: 接続中 (${result.account.username})`, "ready");
-      toast("OneDriveに接続しました。");
-    } catch (error) {
-      console.error(error);
-      setOneDriveStatus("OneDrive: 接続失敗", "error");
-      toast(error.message || "OneDriveに接続できませんでした。");
-    }
-  }
-
-  async function getGraphToken(interactive = true) {
-    const app = await ensureMsalApp();
-    let account = activeOneDriveAccount(app);
-    if (!account) {
-      if (!interactive) return null;
-      const result = await app.loginPopup({ scopes: GRAPH_SCOPES });
-      account = result.account;
-      app.setActiveAccount(account);
-    }
-    try {
-      const result = await app.acquireTokenSilent({ scopes: GRAPH_SCOPES, account });
-      return result.accessToken;
-    } catch (error) {
-      if (!interactive) return null;
-      const result = await app.acquireTokenPopup({ scopes: GRAPH_SCOPES, account });
-      return result.accessToken;
-    }
-  }
-
-  async function graphFetch(url, options = {}, interactive = true) {
-    const token = await getGraphToken(interactive);
-    if (!token) return null;
-    const headers = new Headers(options.headers || {});
-    headers.set("Authorization", `Bearer ${token}`);
-    return fetch(url, { ...options, headers });
-  }
-
-  async function fetchOneDriveMetadata(interactive = true) {
-    const url = `${oneDriveFileBaseUrl()}?$select=id,name,eTag,@microsoft.graph.downloadUrl`;
-    const response = await graphFetch(url, { method: "GET" }, interactive);
-    if (!response) return null;
-    if (response.status === 404) return null;
-    if (!response.ok) throw new Error(`OneDrive台帳情報の取得に失敗しました (${response.status})`);
-    return response.json();
-  }
-
-  async function loadLedgerFromOneDrive() {
-    try {
-      setOneDriveStatus("OneDrive: 読込中", "warning");
-      const metadata = await fetchOneDriveMetadata(true);
-      if (!metadata) {
-        if (confirm("OneDriveに台帳ファイルがありません。現在のデータで新規作成しますか？")) {
-          await saveLedgerToOneDrive(false);
-        } else {
-          setOneDriveStatus("OneDrive: 台帳なし", "warning");
-        }
-        return;
-      }
-      const downloadUrl = metadata["@microsoft.graph.downloadUrl"];
-      if (!downloadUrl) throw new Error("OneDrive台帳のダウンロードURLを取得できませんでした。");
-      const contentResponse = await fetch(downloadUrl, { cache: "no-store" });
-      if (!contentResponse.ok) throw new Error(`OneDrive台帳の読込に失敗しました (${contentResponse.status})`);
-      const remoteState = normalizeState(JSON.parse(await contentResponse.text()));
-      state = remoteState;
-      oneDriveFileETag = metadata.eTag || "";
-      localStorage.setItem(ONEDRIVE_ETAG_KEY, oneDriveFileETag);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      render();
-      resetDeliveryForm();
-      resetSettlementForm();
-      setOneDriveStatus(`OneDrive: 読込済 (${oneDriveFileName()})`, "ready");
-      toast("OneDriveから台帳を読み込みました。");
-    } catch (error) {
-      console.error(error);
-      setOneDriveStatus("OneDrive: 読込失敗", "error");
-      toast(error.message || "OneDriveから読み込めませんでした。");
-    }
-  }
-
-  async function saveLedgerToOneDrive(useETag = true, interactive = true) {
-    if (oneDriveSaveInProgress) {
-      oneDriveSaveQueued = true;
-      return;
-    }
-    oneDriveSaveInProgress = true;
-    try {
-      setOneDriveStatus("OneDrive: 保存中", "warning");
-      const headers = { "Content-Type": "application/json; charset=utf-8" };
-      if (useETag && oneDriveFileETag) headers["If-Match"] = oneDriveFileETag;
-      const response = await graphFetch(`${oneDriveFileBaseUrl()}:/content`, {
-        method: "PUT",
-        headers,
-        body: JSON.stringify(state, null, 2)
-      }, interactive);
-      if (!response) {
-        setOneDriveStatus("OneDrive: 接続待ち", "warning");
-        return;
-      }
-      if (response.status === 412) {
-        setOneDriveStatus("OneDrive: 競合あり", "error");
-        toast("OneDrive側が先に更新されています。先にOneDriveから読み込んでください。");
-        return;
-      }
-      if (!response.ok) throw new Error(`OneDrive保存に失敗しました (${response.status})`);
-      const item = await response.json();
-      oneDriveFileETag = item.eTag || "";
-      localStorage.setItem(ONEDRIVE_ETAG_KEY, oneDriveFileETag);
-      setOneDriveStatus(`OneDrive: 保存済 (${oneDriveFileName()})`, "ready");
-      if (interactive) toast("OneDriveへ保存しました。");
-    } catch (error) {
-      console.error(error);
-      setOneDriveStatus("OneDrive: 保存失敗", "error");
-      if (interactive) toast(error.message || "OneDriveへ保存できませんでした。");
-    } finally {
-      oneDriveSaveInProgress = false;
-      if (oneDriveSaveQueued) {
-        oneDriveSaveQueued = false;
-        queueOneDriveSave(500);
-      }
-    }
-  }
-
-  function queueOneDriveSave(delay = 1200) {
-    clearTimeout(oneDriveSaveTimer);
-    if (!state.settings.oneDriveAutoSync || !oneDriveClientId()) return;
-    oneDriveSaveTimer = setTimeout(() => saveLedgerToOneDrive(true, false), delay);
-  }
-
 
   function supabaseConfig() {
     return window.HOUKENDO_SUPABASE || {};
@@ -1504,19 +1311,9 @@
 
     $("#settingsForm").addEventListener("submit", (event) => {
       event.preventDefault();
-      const previousClientId = oneDriveClientId();
       const data = formData(event.currentTarget);
       state.settings = { ...state.settings, ...data };
       state.settings.taxRate = Number(state.settings.taxRate || 10);
-      state.settings.oneDriveAutoSync = event.currentTarget.elements.oneDriveAutoSync.checked;
-      state.settings.oneDriveFileName = state.settings.oneDriveFileName || "委託販売管理_台帳.json";
-      if (previousClientId !== oneDriveClientId()) {
-        msalApp = null;
-        msalClientId = "";
-        oneDriveFileETag = "";
-        localStorage.removeItem(ONEDRIVE_ETAG_KEY);
-        setOneDriveStatus("OneDrive: 未接続", "warning");
-      }
       saveState();
       toast("設定を保存しました。");
     });
@@ -1529,9 +1326,6 @@
     $("#productSearch").addEventListener("input", renderProducts);
     $("#seedData").addEventListener("click", seedData);
     $("#showGuide").addEventListener("click", () => showOnboarding(true));
-    $("#connectOneDrive").addEventListener("click", signInOneDrive);
-    $("#loadOneDrive").addEventListener("click", loadLedgerFromOneDrive);
-    $("#saveOneDrive").addEventListener("click", () => saveLedgerToOneDrive(true, true));
     $("#openCloudPanel").addEventListener("click", openCloudPanel);
     $("#closeCloudPanel").addEventListener("click", closeCloudPanel);
     $("#signInSupabase").addEventListener("click", signInSupabase);
