@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
   "use strict";
 
   const STORAGE_KEY = "consignment-ledger-v1";
@@ -9,6 +9,7 @@
   const ONBOARDING_DONE_KEY = "consignment-ledger-onboarding-done";
   const ONBOARDING_VERSION = "2026-06-05";
   const ONEDRIVE_ETAG_KEY = "consignment-ledger-onedrive-etag";
+  const CLOUD_WORKSPACE_KEY = "consignment-ledger-cloud-workspace";
   const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
   const GRAPH_SCOPES = ["Files.ReadWrite.AppFolder"];
   const taxRates = { taxable: 10, reduced: 8, exempt: 0 };
@@ -49,6 +50,13 @@
   let oneDriveSaveTimer = null;
   let oneDriveSaveInProgress = false;
   let oneDriveSaveQueued = false;
+  let supabaseClient = null;
+  let supabaseSession = null;
+  let cloudWorkspaces = [];
+  let currentWorkspaceId = localStorage.getItem(CLOUD_WORKSPACE_KEY) || "";
+  let cloudSaveTimer = null;
+  let cloudSaveInProgress = false;
+  let cloudSaveQueued = false;
 
   const onboardingSteps = [
     {
@@ -112,6 +120,7 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     queueFileSave();
     queueOneDriveSave();
+    queueSupabaseSave();
   }
 
   function supportsFileSystemAccess() {
@@ -211,6 +220,10 @@
   function updateSetupPrompt() {
     const prompt = $("#setupPrompt");
     if (!prompt) return;
+    if (isSupabaseConfigured()) {
+      prompt.hidden = true;
+      return;
+    }
     const dismissed = localStorage.getItem(SETUP_DISMISSED_KEY) === "1";
     prompt.hidden = Boolean(ledgerFileHandle || dismissed);
   }
@@ -529,6 +542,315 @@
     if (!state.settings.oneDriveAutoSync || !oneDriveClientId()) return;
     oneDriveSaveTimer = setTimeout(() => saveLedgerToOneDrive(true, false), delay);
   }
+
+
+  function supabaseConfig() {
+    return window.HOUKENDO_SUPABASE || {};
+  }
+
+  function isSupabaseConfigured() {
+    const config = supabaseConfig();
+    return Boolean(config.url && config.anonKey && String(config.url).startsWith("https://"));
+  }
+
+  function setSupabaseStatus(message, mode = "") {
+    const status = $("#supabaseStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.toggle("ready", mode === "ready");
+    status.classList.toggle("warning", mode === "warning");
+    status.classList.toggle("error", mode === "error");
+  }
+
+  function requireSupabaseClient() {
+    if (!isSupabaseConfigured()) throw new Error("Supabaseの接続先が未設定です。");
+    if (!window.supabase?.createClient) throw new Error("Supabaseライブラリを読み込めませんでした。");
+    if (supabaseClient) return supabaseClient;
+    const config = supabaseConfig();
+    supabaseClient = window.supabase.createClient(config.url, config.anonKey, {
+      auth: { persistSession: true, autoRefreshToken: true }
+    });
+    return supabaseClient;
+  }
+
+  function openCloudPanel() {
+    const panel = $("#cloudAuthPanel");
+    if (!panel) return;
+    panel.hidden = false;
+    updateCloudAuthUi();
+  }
+
+  function closeCloudPanel() {
+    const panel = $("#cloudAuthPanel");
+    if (panel) panel.hidden = true;
+  }
+
+  function updateCloudAuthUi() {
+    const panel = $("#cloudAuthPanel");
+    if (!panel) return;
+    const configured = isSupabaseConfigured();
+    $("#supabaseConfigNotice").hidden = configured;
+    $("#authSignedOut").hidden = !configured || Boolean(supabaseSession);
+    $("#authSignedIn").hidden = !configured || !supabaseSession;
+    $("#cloudUserEmail").textContent = supabaseSession?.user?.email || "-";
+    renderWorkspaceSelect();
+  }
+
+  function renderWorkspaceSelect() {
+    const select = $("#workspaceSelect");
+    if (!select) return;
+    select.innerHTML = cloudWorkspaces.length
+      ? cloudWorkspaces.map((workspace) => `<option value="${esc(workspace.id)}">${esc(workspace.name)} (${esc(workspace.role)})</option>`).join("")
+      : `<option value="">台帳がありません</option>`;
+    select.value = currentWorkspaceId || cloudWorkspaces[0]?.id || "";
+    const workspace = currentWorkspace();
+    $("#workspaceInviteCode").textContent = workspace?.invite_code || "-";
+  }
+
+  function currentWorkspace() {
+    return cloudWorkspaces.find((workspace) => workspace.id === currentWorkspaceId) || null;
+  }
+
+  function hasLedgerContent() {
+    return Boolean(state.partners.length || state.products.length || state.deliveries.length || state.settlements.length);
+  }
+
+  async function refreshCloudWorkspaces() {
+    const client = requireSupabaseClient();
+    const { data: memberships, error: memberError } = await client
+      .from("workspace_members")
+      .select("workspace_id, role")
+      .eq("user_id", supabaseSession.user.id)
+      .order("created_at", { ascending: true });
+    if (memberError) throw memberError;
+
+    const rows = memberships || [];
+    if (!rows.length) {
+      cloudWorkspaces = [];
+      currentWorkspaceId = "";
+      localStorage.removeItem(CLOUD_WORKSPACE_KEY);
+      renderWorkspaceSelect();
+      setSupabaseStatus("クラウド: 台帳未作成", "warning");
+      return [];
+    }
+
+    const ids = rows.map((row) => row.workspace_id);
+    const roleByWorkspace = new Map(rows.map((row) => [row.workspace_id, row.role]));
+    const { data: workspaces, error: workspaceError } = await client
+      .from("workspaces")
+      .select("id, name, invite_code, owner_id, updated_at")
+      .in("id", ids)
+      .order("updated_at", { ascending: false });
+    if (workspaceError) throw workspaceError;
+
+    cloudWorkspaces = (workspaces || []).map((workspace) => ({
+      ...workspace,
+      role: roleByWorkspace.get(workspace.id) || "editor"
+    }));
+
+    if (!cloudWorkspaces.some((workspace) => workspace.id === currentWorkspaceId)) {
+      currentWorkspaceId = cloudWorkspaces[0]?.id || "";
+    }
+    if (currentWorkspaceId) localStorage.setItem(CLOUD_WORKSPACE_KEY, currentWorkspaceId);
+    renderWorkspaceSelect();
+    return cloudWorkspaces;
+  }
+
+  async function loadCloudLedger(showMessage = true) {
+    if (!currentWorkspaceId) {
+      setSupabaseStatus("クラウド: 台帳を選択してください", "warning");
+      if (showMessage) toast("クラウド台帳を作成または選択してください。");
+      return;
+    }
+    const client = requireSupabaseClient();
+    setSupabaseStatus("クラウド: 読込中", "warning");
+    const { data, error } = await client
+      .from("ledgers")
+      .select("data, revision, updated_at")
+      .eq("workspace_id", currentWorkspaceId)
+      .maybeSingle();
+    if (error) throw error;
+
+    state = normalizeState(data?.data || {});
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    render();
+    resetDeliveryForm();
+    resetSettlementForm();
+    updateSetupPrompt();
+    setSupabaseStatus(`クラウド: 読込済 (${currentWorkspace()?.name || "台帳"})`, "ready");
+    if (showMessage) toast("クラウド台帳を読み込みました。");
+  }
+
+  async function saveCloudLedger(showMessage = false) {
+    if (!supabaseSession || !currentWorkspaceId) return;
+    if (cloudSaveInProgress) {
+      cloudSaveQueued = true;
+      return;
+    }
+    cloudSaveInProgress = true;
+    try {
+      const client = requireSupabaseClient();
+      setSupabaseStatus("クラウド: 保存中", "warning");
+      const { error } = await client.from("ledgers").upsert({
+        workspace_id: currentWorkspaceId,
+        data: state,
+        updated_by: supabaseSession.user.id
+      }, { onConflict: "workspace_id" });
+      if (error) throw error;
+      setSupabaseStatus(`クラウド: 保存済 (${currentWorkspace()?.name || "台帳"})`, "ready");
+      if (showMessage) toast("クラウドへ保存しました。");
+    } catch (error) {
+      console.error(error);
+      setSupabaseStatus("クラウド: 保存失敗", "error");
+      if (showMessage) toast(error.message || "クラウドへ保存できませんでした。");
+    } finally {
+      cloudSaveInProgress = false;
+      if (cloudSaveQueued) {
+        cloudSaveQueued = false;
+        queueSupabaseSave(600);
+      }
+    }
+  }
+
+  function queueSupabaseSave(delay = 1200) {
+    if (!supabaseSession || !currentWorkspaceId) return;
+    clearTimeout(cloudSaveTimer);
+    cloudSaveTimer = setTimeout(() => saveCloudLedger(false), delay);
+  }
+
+  async function signInSupabase() {
+    try {
+      const client = requireSupabaseClient();
+      const email = $("#authEmail").value.trim();
+      const password = $("#authPassword").value;
+      if (!email || !password) return toast("メールアドレスとパスワードを入力してください。");
+      const { error } = await client.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      toast("ログインしました。");
+    } catch (error) {
+      console.error(error);
+      toast(error.message || "ログインできませんでした。");
+    }
+  }
+
+  async function signUpSupabase() {
+    try {
+      const client = requireSupabaseClient();
+      const email = $("#authEmail").value.trim();
+      const password = $("#authPassword").value;
+      if (!email || password.length < 8) return toast("メールアドレスと8文字以上のパスワードを入力してください。");
+      const { data, error } = await client.auth.signUp({ email, password });
+      if (error) throw error;
+      if (data.session) toast("アカウントを作成しました。");
+      else toast("確認メールを送信しました。メール内のリンクを開いてください。");
+    } catch (error) {
+      console.error(error);
+      toast(error.message || "新規登録できませんでした。");
+    }
+  }
+
+  async function signOutSupabase() {
+    if (!supabaseClient) return;
+    await supabaseClient.auth.signOut();
+    supabaseSession = null;
+    cloudWorkspaces = [];
+    currentWorkspaceId = "";
+    localStorage.removeItem(CLOUD_WORKSPACE_KEY);
+    setSupabaseStatus("クラウド: 未ログイン", "warning");
+    updateCloudAuthUi();
+    toast("ログアウトしました。");
+  }
+
+  async function createWorkspace() {
+    try {
+      const client = requireSupabaseClient();
+      const name = $("#newWorkspaceName").value.trim() || "委託販売台帳";
+      const { data, error } = await client.rpc("create_personal_workspace", { workspace_name: name });
+      if (error) throw error;
+      await refreshCloudWorkspaces();
+      currentWorkspaceId = data?.id || currentWorkspaceId;
+      localStorage.setItem(CLOUD_WORKSPACE_KEY, currentWorkspaceId);
+      renderWorkspaceSelect();
+      if (hasLedgerContent() && confirm("現在ブラウザにある台帳データを新しいクラウド台帳へ保存しますか？") ) {
+        await saveCloudLedger(true);
+      } else {
+        await loadCloudLedger(false);
+      }
+      toast("クラウド台帳を作成しました。");
+    } catch (error) {
+      console.error(error);
+      toast(error.message || "台帳を作成できませんでした。");
+    }
+  }
+
+  async function joinWorkspace() {
+    try {
+      const client = requireSupabaseClient();
+      const code = $("#joinWorkspaceCode").value.trim();
+      if (!code) return toast("参加コードを入力してください。");
+      const { data, error } = await client.rpc("join_workspace_with_code", { join_code: code });
+      if (error) throw error;
+      await refreshCloudWorkspaces();
+      currentWorkspaceId = data?.id || currentWorkspaceId;
+      localStorage.setItem(CLOUD_WORKSPACE_KEY, currentWorkspaceId);
+      renderWorkspaceSelect();
+      await loadCloudLedger(true);
+      toast("クラウド台帳に参加しました。");
+    } catch (error) {
+      console.error(error);
+      toast(error.message || "台帳に参加できませんでした。");
+    }
+  }
+
+  async function handleSupabaseSessionChange(loadLedger = true) {
+    updateCloudAuthUi();
+    if (!supabaseSession) {
+      setSupabaseStatus(isSupabaseConfigured() ? "クラウド: 未ログイン" : "クラウド: 未設定", isSupabaseConfigured() ? "warning" : "");
+      return;
+    }
+    try {
+      setSupabaseStatus("クラウド: 接続中", "warning");
+      await refreshCloudWorkspaces();
+      updateCloudAuthUi();
+      if (currentWorkspaceId && loadLedger) {
+        await loadCloudLedger(false);
+      } else if (!currentWorkspaceId) {
+        setSupabaseStatus("クラウド: 台帳未作成", "warning");
+      }
+    } catch (error) {
+      console.error(error);
+      setSupabaseStatus("クラウド: 接続失敗", "error");
+      toast(error.message || "クラウドに接続できませんでした。");
+    }
+  }
+
+  async function initSupabase() {
+    updateCloudAuthUi();
+    if (!isSupabaseConfigured()) {
+      setSupabaseStatus("クラウド: 未設定", "warning");
+      return;
+    }
+    try {
+      const client = requireSupabaseClient();
+      const { data } = await client.auth.getSession();
+      supabaseSession = data.session;
+      client.auth.onAuthStateChange((_event, session) => {
+        supabaseSession = session;
+        handleSupabaseSessionChange(true);
+      });
+      await handleSupabaseSessionChange(true);
+    } catch (error) {
+      console.error(error);
+      setSupabaseStatus("クラウド: 初期化失敗", "error");
+    }
+  }
+
+  function registerServiceWorker() {
+    const canRegister = location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    if (!("serviceWorker" in navigator) || !canRegister) return;
+    navigator.serviceWorker.register("sw.js").catch((error) => console.warn("Service worker registration failed", error));
+  }
+
   function toast(message) {
     const box = $("#toast");
     box.textContent = message;
@@ -1210,6 +1532,21 @@
     $("#connectOneDrive").addEventListener("click", signInOneDrive);
     $("#loadOneDrive").addEventListener("click", loadLedgerFromOneDrive);
     $("#saveOneDrive").addEventListener("click", () => saveLedgerToOneDrive(true, true));
+    $("#openCloudPanel").addEventListener("click", openCloudPanel);
+    $("#closeCloudPanel").addEventListener("click", closeCloudPanel);
+    $("#signInSupabase").addEventListener("click", signInSupabase);
+    $("#signUpSupabase").addEventListener("click", signUpSupabase);
+    $("#signOutSupabase").addEventListener("click", signOutSupabase);
+    $("#createWorkspace").addEventListener("click", createWorkspace);
+    $("#joinWorkspace").addEventListener("click", joinWorkspace);
+    $("#loadCloudLedger").addEventListener("click", () => loadCloudLedger(true).catch((error) => { console.error(error); toast(error.message || "クラウドから読み込めませんでした。"); }));
+    $("#saveCloudLedger").addEventListener("click", () => saveCloudLedger(true));
+    $("#workspaceSelect").addEventListener("change", (event) => {
+      currentWorkspaceId = event.currentTarget.value;
+      if (currentWorkspaceId) localStorage.setItem(CLOUD_WORKSPACE_KEY, currentWorkspaceId);
+      renderWorkspaceSelect();
+      loadCloudLedger(true).catch((error) => { console.error(error); toast(error.message || "クラウドから読み込めませんでした。"); });
+    });
     $("#chooseAutoSaveFile").addEventListener("click", chooseAutoSaveFile);
     $("#openLedgerFile").addEventListener("click", openLedgerFile);
     $("#setupAutoSaveFile").addEventListener("click", chooseAutoSaveFile);
@@ -1326,6 +1663,13 @@
     resetSettlementForm();
     updateSetupPrompt();
     showOnboarding();
+    registerServiceWorker();
+    initSupabase();
+    if (isSupabaseConfigured()) {
+      setAutoSaveStatus("ローカル控え: ブラウザ内", "ready");
+      updateSetupPrompt();
+      return;
+    }
     initAutoSaveFile().then(() => {
       render();
       resetDeliveryForm();

@@ -1,0 +1,18 @@
+{
+  "name": "委託販売管理",
+  "short_name": "委託販売管理",
+  "description": "委託販売の納品、在庫、精算、請求を管理するアプリ",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f5f2",
+  "theme_color": "#1e2b26",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

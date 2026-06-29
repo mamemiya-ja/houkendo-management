@@ -9,9 +9,59 @@
   <meta name="apple-mobile-web-app-title" content="委託販売管理">
   <meta name="format-detection" content="telephone=no">
   <title>委託販売管理・精算請求システム</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div id="cloudAuthPanel" class="auth-shell" hidden>
+    <section class="auth-card">
+      <div class="auth-head">
+        <div>
+          <p class="eyebrow">Cloud ledger</p>
+          <h2>クラウド台帳</h2>
+        </div>
+        <button id="closeCloudPanel" class="icon-action" type="button">閉じる</button>
+      </div>
+
+      <div id="supabaseConfigNotice" class="notice warning" hidden>
+        Supabaseの接続先が未設定です。supabase-config.js にURLとanon keyを設定してください。
+      </div>
+
+      <div id="authSignedOut" class="auth-section">
+        <p class="muted">あなたと親御さんで別々のアカウントを使い、同じ台帳を共有できます。</p>
+        <label>メールアドレス<input id="authEmail" type="email" autocomplete="email" placeholder="name@example.com"></label>
+        <label>パスワード<input id="authPassword" type="password" autocomplete="current-password" placeholder="8文字以上"></label>
+        <div class="form-actions">
+          <button id="signInSupabase" class="primary-button" type="button">ログイン</button>
+          <button id="signUpSupabase" class="secondary-button" type="button">新規登録</button>
+        </div>
+      </div>
+
+      <div id="authSignedIn" class="auth-section" hidden>
+        <div class="cloud-account">
+          <span>ログイン中</span>
+          <strong id="cloudUserEmail">-</strong>
+        </div>
+        <label>使用する台帳<select id="workspaceSelect"></select></label>
+        <div class="form-actions">
+          <button id="loadCloudLedger" class="secondary-button" type="button">クラウドから読込</button>
+          <button id="saveCloudLedger" class="primary-button" type="button">クラウドへ保存</button>
+        </div>
+        <div class="cloud-account">
+          <span>参加コード</span>
+          <strong id="workspaceInviteCode">-</strong>
+        </div>
+        <p class="field-help">親御さんのアカウントでは、この参加コードを入力すると同じ台帳を使えます。</p>
+        <label>新しい台帳名<input id="newWorkspaceName" placeholder="委託販売台帳"></label>
+        <button id="createWorkspace" class="secondary-button" type="button">台帳を作成</button>
+        <label>参加コード<input id="joinWorkspaceCode" placeholder="例: A1B2C3D4E5F6"></label>
+        <button id="joinWorkspace" class="secondary-button" type="button">台帳に参加</button>
+        <button id="signOutSupabase" class="text-button" type="button">ログアウト</button>
+      </div>
+    </section>
+  </div>
+
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
@@ -32,6 +82,8 @@
         <button class="nav-item" data-view="settings">設定</button>
       </nav>
       <div class="side-actions">
+        <div id="supabaseStatus" class="cloud-status">クラウド: 未設定</div>
+        <button id="openCloudPanel" class="ghost-button">ログイン/同期</button>
         <div id="autoSaveStatus" class="save-status">自動保存: 未設定</div>
         <div id="oneDriveStatus" class="cloud-status">OneDrive: 未接続</div>
         <button id="showGuide" class="ghost-button">使い方ガイド</button>
@@ -337,6 +389,8 @@
     </div>
   </div>
   <div id="toast" role="status"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
   <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
   <script src="app.js"></script>
 </body>

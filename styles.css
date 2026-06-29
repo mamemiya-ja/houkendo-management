@@ -545,6 +545,77 @@ th.numeric {
   display: none;
 }
 
+
+.auth-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(23, 33, 29, 0.58);
+}
+
+.auth-shell[hidden] {
+  display: none;
+}
+
+.auth-card {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 22px 80px rgba(20, 30, 25, 0.28);
+  padding: 22px;
+}
+
+.auth-head,
+.cloud-account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auth-head {
+  margin-bottom: 16px;
+}
+
+.auth-head h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.auth-section {
+  display: grid;
+  gap: 12px;
+}
+
+.notice {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.notice.warning {
+  border-color: #e8c472;
+  background: #fff8e8;
+}
+
+.cloud-account {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.cloud-account span {
+  color: var(--muted);
+}
+
 .onboarding {
   position: fixed;
   inset: 0;
@@ -1074,9 +1145,11 @@ th.numeric {
     display: none !important;
   }
 
+  .side-actions #supabaseStatus,
   .side-actions #googleDriveStatus,
   .side-actions #autoSaveStatus,
-  .side-actions #oneDriveStatus {
+  .side-actions #oneDriveStatus,
+  .side-actions #openCloudPanel {
     display: flex !important;
     align-items: center;
     width: 100%;
@@ -1088,6 +1161,12 @@ th.numeric {
     line-height: 1.35;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .side-actions #openCloudPanel {
+    justify-content: center;
+    margin-top: 8px;
+    font-weight: 700;
   }
 
   .nav {
@@ -1409,13 +1488,19 @@ th.numeric {
     font-size: 20px;
   }
 
+  .side-actions #supabaseStatus,
   .side-actions #googleDriveStatus,
   .side-actions #autoSaveStatus,
-  .side-actions #oneDriveStatus {
-    min-height: 42px;
-    padding: 10px 12px;
-    font-size: 15px;
+  .side-actions #oneDriveStatus,
+  .side-actions #openCloudPanel {
+    min-height: 50px;
+    padding: 12px 14px;
+    font-size: 18px;
     line-height: 1.35;
+  }
+
+  .side-actions #openCloudPanel {
+    margin-top: 10px;
   }
 
   .workspace {
@@ -1503,6 +1588,39 @@ th.numeric {
     min-width: 72px;
     min-height: 60px;
     font-size: 18px;
+  }
+
+  .auth-shell {
+    place-items: end center;
+    padding: 12px;
+  }
+
+  .auth-card {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+    padding: 24px 18px;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .auth-head h2 {
+    font-size: 32px;
+    line-height: 1.15;
+  }
+
+  .auth-section {
+    gap: 16px;
+  }
+
+  .cloud-account {
+    align-items: flex-start;
+    flex-direction: column;
+    font-size: 20px;
+    line-height: 1.45;
+  }
+
+  .notice {
+    font-size: 18px;
+    line-height: 1.6;
   }
 
   .list,
