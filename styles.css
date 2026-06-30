@@ -1060,12 +1060,30 @@ th.numeric {
     margin-top: 0;
   }
 
+  .side-actions {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+  }
+
   .side-actions > * {
     display: none !important;
   }
 
   .side-actions #supabaseStatus,
+  .side-actions #logoutButton {
+    display: flex !important;
+  }
 
+  .side-actions #supabaseStatus {
+    flex: 1;
+  }
+
+  .side-actions #logoutButton {
+    min-height: 44px;
+    padding: 8px 12px;
+    white-space: nowrap;
+  }
 
   .nav {
     position: fixed;

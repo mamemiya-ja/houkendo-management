@@ -99,6 +99,11 @@
     if (message) setLoginStatus(message);
   }
 
+  function setLogoutBusy(isBusy) {
+    const button = $("#logoutButton");
+    if (button) button.disabled = isBusy;
+  }
+
   function updateAuthScreens() {
     const signedIn = Boolean(supabaseSession);
     const configured = isSupabaseConfigured();
@@ -281,6 +286,28 @@
     }
   }
 
+
+  async function signOutSupabase() {
+    try {
+      setLogoutBusy(true);
+      clearTimeout(cloudSaveTimer);
+      if (supabaseSession) await saveCloudLedger(false);
+      const client = requireSupabaseClient();
+      const { error } = await client.auth.signOut();
+      if (error) throw error;
+      supabaseSession = null;
+      cloudSaveQueued = false;
+      updateAuthScreens();
+      setSupabaseStatus("クラウド: 未ログイン", "warning");
+      setLoginStatus("ログアウトしました。", "ready");
+      toast("ログアウトしました。");
+    } catch (error) {
+      console.error(error);
+      toast(error.message || "ログアウトできませんでした。");
+    } finally {
+      setLogoutBusy(false);
+    }
+  }
 
   async function handleSupabaseSessionChange(loadLedger = true) {
     updateAuthScreens();
@@ -899,6 +926,7 @@
       signInSupabase("login");
     });
     $("#loginSignUp").addEventListener("click", () => signUpSupabase("login"));
+    $("#logoutButton").addEventListener("click", signOutSupabase);
 
     $$(".nav-item, [data-view-link]").forEach((button) => {
       button.addEventListener("click", () => showView(button.dataset.view || button.dataset.viewLink));
