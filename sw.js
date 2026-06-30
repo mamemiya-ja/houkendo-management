@@ -1,4 +1,4 @@
-const CACHE_NAME = "consignment-ledger-v3";
+const CACHE_NAME = "consignment-ledger-v4";
 const STATIC_ASSETS = [
   "./",
   "./index.html",

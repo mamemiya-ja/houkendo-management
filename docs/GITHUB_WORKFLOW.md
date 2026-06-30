@@ -1,16 +1,15 @@
-# GitHub運用メモ
+# GitHub管理メモ
 
-このプロジェクトはGitで履歴管理します。GitHub Pagesへ公開する場合も、実データの台帳JSONやバックアップJSONはコミットしないでください。
+このリポジトリはGitHub Pagesで公開するアプリ本体を管理します。データの正本はSupabaseに保存します。
 
-## 初回の流れ
+## 初回公開の流れ
 
-1. ローカルでGitリポジトリを作成します。
-2. `index.html`, `app.js`, `styles.css`, `sw.js`, `manifest.webmanifest`, `supabase/`, `docs/`, `README.md` などアプリ本体だけをコミットします。
-3. GitHubで新しいリポジトリを作成します。
-4. ローカルに `origin` を追加してpushします。
-5. GitHub Pagesを有効化します。
+1. `index.html`, `app.js`, `styles.css`, `sw.js`, `manifest.webmanifest`, `supabase/`, `docs/`, `README.md` などアプリ本体をコミットします。
+2. GitHubのリポジトリをPublicにします。
+3. `main` ブランチへpushします。
+4. GitHub Pagesを有効化します。
 
-## GitHub Pagesで公開する場合
+## GitHub Pages設定
 
 リポジトリ設定の Pages で次のように設定します。
 
@@ -26,19 +25,22 @@ Folder: /root
 https://ユーザー名.github.io/リポジトリ名/
 ```
 
-Supabase Auth を使う場合、Supabase の Authentication > URL Configuration にこの公開URLを登録してください。
+Supabase Authを使うため、Supabaseの `Authentication` > `URL Configuration` にこの公開URLを登録してください。
 
 ## Supabase設定ファイル
 
-`supabase-config.js` にはブラウザ用の `Project URL` と `anon public key` を入れます。
+`supabase-config.js` にはブラウザ用の `Project URL` と `publishable key` を入れます。これは公開前提のキーですが、`supabase/schema.sql` のRLSが有効であることが必須です。
 
-`anon public key` は公開前提のキーですが、RLSなしで使うと危険です。必ず先に `supabase/schema.sql` をSupabase SQL Editorで実行し、Row Level Securityを有効にしてから公開してください。
+絶対にコミットしないもの:
 
-## コミットしないもの
+- Supabase service role key
+- Supabase JWT secret
+- GitHub Personal Access Token
+- 個人情報を含む一時データ
 
-- `委託販売管理_台帳.json`
-- `*_台帳.json`
-- `*バックアップ*.json`
-- `*.Zone.Identifier`
-- 配布用ZIP
-- 個人情報入りバックアップJSON
+## 変更時の確認
+
+- `node --check app.js`
+- `node --check sw.js`
+- 公開URLでログイン、保存、再読込を確認
+- 画面やREADMEに旧運用の文言が残っていないことを確認

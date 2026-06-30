@@ -2,13 +2,8 @@
   "use strict";
 
   const STORAGE_KEY = "consignment-ledger-v1";
-  const HANDLE_DB = "consignment-ledger-file";
-  const HANDLE_STORE = "handles";
-  const HANDLE_KEY = "ledger";
-  const SETUP_DISMISSED_KEY = "consignment-ledger-setup-dismissed";
   const ONBOARDING_DONE_KEY = "consignment-ledger-onboarding-done";
   const ONBOARDING_VERSION = "2026-06-05";
-  const CLOUD_WORKSPACE_KEY = "consignment-ledger-cloud-workspace";
   const taxRates = { taxable: 10, reduced: 8, exempt: 0 };
   const taxNames = { taxable: "課税10%", reduced: "軽減8%", exempt: "非課税" };
 
@@ -33,23 +28,17 @@
   let state = loadState();
   let productImageDraft = "";
   let inventoryMode = "partner";
-  let ledgerFileHandle = null;
-  let fileSaveTimer = null;
-  let fileSaveInProgress = false;
-  let fileSaveQueued = false;
   let onboardingIndex = 0;
   let supabaseClient = null;
   let supabaseSession = null;
-  let cloudWorkspaces = [];
-  let currentWorkspaceId = localStorage.getItem(CLOUD_WORKSPACE_KEY) || "";
   let cloudSaveTimer = null;
   let cloudSaveInProgress = false;
   let cloudSaveQueued = false;
 
   const onboardingSteps = [
     {
-      title: "最初に台帳ファイルを決めます",
-      body: "このアプリはPC内のJSONファイルへ自動保存できます。\nまず左側の「自動保存先設定」で保存先を選んでください。選んだ後は登録や編集のたびに自動で保存されます。",
+      title: "クラウド台帳にログインします",
+      body: "このアプリはSupabase上のクラウド台帳へ保存します。\n左側の「ログイン/同期」からメールアドレスとパスワードでログインしてください。",
       view: "dashboard"
     },
     {
@@ -106,113 +95,7 @@
 
   function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    queueFileSave();
     queueSupabaseSave();
-  }
-
-  function supportsFileSystemAccess() {
-    return "showSaveFilePicker" in window && "showOpenFilePicker" in window;
-  }
-
-  function dbRequest(request) {
-    return new Promise((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  function transactionDone(tx) {
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-  }
-
-  async function openHandleDb() {
-    const request = indexedDB.open(HANDLE_DB, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(HANDLE_STORE);
-    return dbRequest(request);
-  }
-
-  async function setStoredFileHandle(handle) {
-    const db = await openHandleDb();
-    const tx = db.transaction(HANDLE_STORE, "readwrite");
-    tx.objectStore(HANDLE_STORE).put(handle, HANDLE_KEY);
-    await transactionDone(tx);
-    db.close();
-  }
-
-  async function getStoredFileHandle() {
-    const db = await openHandleDb();
-    const tx = db.transaction(HANDLE_STORE, "readonly");
-    const handle = await dbRequest(tx.objectStore(HANDLE_STORE).get(HANDLE_KEY));
-    db.close();
-    return handle || null;
-  }
-
-  async function verifyFilePermission(handle, mode = "readwrite") {
-    const options = { mode };
-    if ((await handle.queryPermission(options)) === "granted") return true;
-    return (await handle.requestPermission(options)) === "granted";
-  }
-
-  async function hasFilePermission(handle, mode = "readwrite") {
-    return (await handle.queryPermission({ mode })) === "granted";
-  }
-
-  async function writeLedgerFile() {
-    if (!ledgerFileHandle) return;
-    if (fileSaveInProgress) {
-      fileSaveQueued = true;
-      return;
-    }
-    fileSaveInProgress = true;
-    try {
-      if (!(await hasFilePermission(ledgerFileHandle, "readwrite"))) {
-        setAutoSaveStatus("自動保存: 権限が必要", "warning");
-        return;
-      }
-      const writable = await ledgerFileHandle.createWritable();
-      await writable.write(JSON.stringify(state, null, 2));
-      await writable.close();
-      setAutoSaveStatus(`自動保存中: ${ledgerFileHandle.name}`, "ready");
-    } catch (error) {
-      console.error(error);
-      setAutoSaveStatus("自動保存: 失敗", "warning");
-      toast("台帳ファイルへの自動保存に失敗しました。");
-    } finally {
-      fileSaveInProgress = false;
-      if (fileSaveQueued) {
-        fileSaveQueued = false;
-        queueFileSave(100);
-      }
-    }
-  }
-
-  function queueFileSave(delay = 400) {
-    if (!ledgerFileHandle) return;
-    clearTimeout(fileSaveTimer);
-    fileSaveTimer = setTimeout(writeLedgerFile, delay);
-  }
-
-  function setAutoSaveStatus(message, mode = "") {
-    const status = $("#autoSaveStatus");
-    if (!status) return;
-    status.textContent = message;
-    status.classList.toggle("ready", mode === "ready");
-    status.classList.toggle("warning", mode === "warning");
-  }
-
-  function updateSetupPrompt() {
-    const prompt = $("#setupPrompt");
-    if (!prompt) return;
-    if (isSupabaseConfigured()) {
-      prompt.hidden = true;
-      return;
-    }
-    const dismissed = localStorage.getItem(SETUP_DISMISSED_KEY) === "1";
-    prompt.hidden = Boolean(ledgerFileHandle || dismissed);
   }
 
   function updateOnboarding() {
@@ -256,101 +139,6 @@
     updateOnboarding();
   }
 
-  async function loadStateFromFileHandle(handle) {
-    const file = await handle.getFile();
-    const text = await file.text();
-    const data = JSON.parse(text);
-    state = normalizeState(data);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }
-
-  async function chooseAutoSaveFile() {
-    if (!supportsFileSystemAccess()) {
-      toast("このブラウザでは自動保存先設定に対応していません。ChromeまたはEdgeで開いてください。");
-      setAutoSaveStatus("自動保存: 非対応ブラウザ", "warning");
-      return;
-    }
-    try {
-      const handle = await window.showSaveFilePicker({
-        suggestedName: "委託販売管理_台帳.json",
-        types: [{ description: "JSON台帳ファイル", accept: { "application/json": [".json"] } }]
-      });
-      ledgerFileHandle = handle;
-      await setStoredFileHandle(handle);
-      await writeLedgerFile();
-      localStorage.removeItem(SETUP_DISMISSED_KEY);
-      updateSetupPrompt();
-      toast("自動保存先を設定しました。");
-    } catch (error) {
-      if (error.name !== "AbortError") {
-        console.error(error);
-        toast("自動保存先を設定できませんでした。");
-      }
-    }
-  }
-
-  async function openLedgerFile() {
-    if (!supportsFileSystemAccess()) {
-      toast("このブラウザでは台帳ファイル読込に対応していません。予備データ読込を使ってください。");
-      setAutoSaveStatus("自動保存: 非対応ブラウザ", "warning");
-      return;
-    }
-    try {
-      const [handle] = await window.showOpenFilePicker({
-        multiple: false,
-        types: [{ description: "JSON台帳ファイル", accept: { "application/json": [".json"] } }]
-      });
-      if (!handle) return;
-      await loadStateFromFileHandle(handle);
-      ledgerFileHandle = handle;
-      await setStoredFileHandle(handle);
-      localStorage.removeItem(SETUP_DISMISSED_KEY);
-      render();
-      resetDeliveryForm();
-      resetSettlementForm();
-      updateSetupPrompt();
-      if (await verifyFilePermission(handle, "readwrite")) {
-        setAutoSaveStatus(`自動保存中: ${handle.name}`, "ready");
-        toast("台帳ファイルを読み込みました。以後はこのファイルへ自動保存します。");
-      } else {
-        setAutoSaveStatus("自動保存: 書込権限が必要", "warning");
-        toast("台帳ファイルを読み込みました。自動保存には書込権限が必要です。");
-      }
-    } catch (error) {
-      if (error.name !== "AbortError") {
-        console.error(error);
-        toast("台帳ファイルを読み込めませんでした。");
-      }
-    }
-  }
-
-  async function initAutoSaveFile() {
-    if (!supportsFileSystemAccess()) {
-      setAutoSaveStatus("自動保存: 非対応ブラウザ", "warning");
-      return;
-    }
-    try {
-      const handle = await getStoredFileHandle();
-      if (!handle) {
-        setAutoSaveStatus("自動保存: 未設定", "warning");
-        updateSetupPrompt();
-        return;
-      }
-      ledgerFileHandle = handle;
-      if (await hasFilePermission(handle, "readwrite")) {
-        await loadStateFromFileHandle(handle);
-        setAutoSaveStatus(`自動保存中: ${handle.name}`, "ready");
-      } else {
-        setAutoSaveStatus("自動保存: 権限が必要", "warning");
-      }
-      updateSetupPrompt();
-    } catch (error) {
-      console.error(error);
-      setAutoSaveStatus("自動保存: 再設定が必要", "warning");
-      updateSetupPrompt();
-    }
-  }
-
   function supabaseConfig() {
     return window.HOUKENDO_SUPABASE || {};
   }
@@ -392,6 +180,7 @@
     if (panel) panel.hidden = true;
   }
 
+
   function updateCloudAuthUi() {
     const panel = $("#cloudAuthPanel");
     if (!panel) return;
@@ -400,96 +189,51 @@
     $("#authSignedOut").hidden = !configured || Boolean(supabaseSession);
     $("#authSignedIn").hidden = !configured || !supabaseSession;
     $("#cloudUserEmail").textContent = supabaseSession?.user?.email || "-";
-    renderWorkspaceSelect();
-  }
-
-  function renderWorkspaceSelect() {
-    const select = $("#workspaceSelect");
-    if (!select) return;
-    select.innerHTML = cloudWorkspaces.length
-      ? cloudWorkspaces.map((workspace) => `<option value="${esc(workspace.id)}">${esc(workspace.name)} (${esc(workspace.role)})</option>`).join("")
-      : `<option value="">台帳がありません</option>`;
-    select.value = currentWorkspaceId || cloudWorkspaces[0]?.id || "";
-    const workspace = currentWorkspace();
-    $("#workspaceInviteCode").textContent = workspace?.invite_code || "-";
-  }
-
-  function currentWorkspace() {
-    return cloudWorkspaces.find((workspace) => workspace.id === currentWorkspaceId) || null;
   }
 
   function hasLedgerContent() {
     return Boolean(state.partners.length || state.products.length || state.deliveries.length || state.settlements.length);
   }
 
-  async function refreshCloudWorkspaces() {
+  async function ensurePersonalLedger() {
     const client = requireSupabaseClient();
-    const { data: memberships, error: memberError } = await client
-      .from("workspace_members")
-      .select("workspace_id, role")
+    const { data, error } = await client
+      .from("user_ledgers")
+      .select("data, revision, updated_at")
       .eq("user_id", supabaseSession.user.id)
-      .order("created_at", { ascending: true });
-    if (memberError) throw memberError;
+      .maybeSingle();
+    if (error) throw error;
+    if (data) return data;
 
-    const rows = memberships || [];
-    if (!rows.length) {
-      cloudWorkspaces = [];
-      currentWorkspaceId = "";
-      localStorage.removeItem(CLOUD_WORKSPACE_KEY);
-      renderWorkspaceSelect();
-      setSupabaseStatus("クラウド: 台帳未作成", "warning");
-      return [];
-    }
-
-    const ids = rows.map((row) => row.workspace_id);
-    const roleByWorkspace = new Map(rows.map((row) => [row.workspace_id, row.role]));
-    const { data: workspaces, error: workspaceError } = await client
-      .from("workspaces")
-      .select("id, name, invite_code, owner_id, updated_at")
-      .in("id", ids)
-      .order("updated_at", { ascending: false });
-    if (workspaceError) throw workspaceError;
-
-    cloudWorkspaces = (workspaces || []).map((workspace) => ({
-      ...workspace,
-      role: roleByWorkspace.get(workspace.id) || "editor"
-    }));
-
-    if (!cloudWorkspaces.some((workspace) => workspace.id === currentWorkspaceId)) {
-      currentWorkspaceId = cloudWorkspaces[0]?.id || "";
-    }
-    if (currentWorkspaceId) localStorage.setItem(CLOUD_WORKSPACE_KEY, currentWorkspaceId);
-    renderWorkspaceSelect();
-    return cloudWorkspaces;
+    const initialData = hasLedgerContent() ? state : normalizeState({});
+    const { data: created, error: createError } = await client
+      .from("user_ledgers")
+      .insert({ user_id: supabaseSession.user.id, data: initialData })
+      .select("data, revision, updated_at")
+      .single();
+    if (createError) throw createError;
+    return created;
   }
 
   async function loadCloudLedger(showMessage = true) {
-    if (!currentWorkspaceId) {
-      setSupabaseStatus("クラウド: 台帳を選択してください", "warning");
-      if (showMessage) toast("クラウド台帳を作成または選択してください。");
+    if (!supabaseSession) {
+      setSupabaseStatus("クラウド: 未ログイン", "warning");
+      if (showMessage) toast("ログインしてください。");
       return;
     }
-    const client = requireSupabaseClient();
     setSupabaseStatus("クラウド: 読込中", "warning");
-    const { data, error } = await client
-      .from("ledgers")
-      .select("data, revision, updated_at")
-      .eq("workspace_id", currentWorkspaceId)
-      .maybeSingle();
-    if (error) throw error;
-
-    state = normalizeState(data?.data || {});
+    const row = await ensurePersonalLedger();
+    state = normalizeState(row?.data || {});
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     render();
     resetDeliveryForm();
     resetSettlementForm();
-    updateSetupPrompt();
-    setSupabaseStatus(`クラウド: 読込済 (${currentWorkspace()?.name || "台帳"})`, "ready");
+    setSupabaseStatus("クラウド: 読込済", "ready");
     if (showMessage) toast("クラウド台帳を読み込みました。");
   }
 
   async function saveCloudLedger(showMessage = false) {
-    if (!supabaseSession || !currentWorkspaceId) return;
+    if (!supabaseSession) return;
     if (cloudSaveInProgress) {
       cloudSaveQueued = true;
       return;
@@ -498,13 +242,12 @@
     try {
       const client = requireSupabaseClient();
       setSupabaseStatus("クラウド: 保存中", "warning");
-      const { error } = await client.from("ledgers").upsert({
-        workspace_id: currentWorkspaceId,
-        data: state,
-        updated_by: supabaseSession.user.id
-      }, { onConflict: "workspace_id" });
+      const { error } = await client.from("user_ledgers").upsert({
+        user_id: supabaseSession.user.id,
+        data: state
+      }, { onConflict: "user_id" });
       if (error) throw error;
-      setSupabaseStatus(`クラウド: 保存済 (${currentWorkspace()?.name || "台帳"})`, "ready");
+      setSupabaseStatus("クラウド: 保存済", "ready");
       if (showMessage) toast("クラウドへ保存しました。");
     } catch (error) {
       console.error(error);
@@ -520,7 +263,7 @@
   }
 
   function queueSupabaseSave(delay = 1200) {
-    if (!supabaseSession || !currentWorkspaceId) return;
+    if (!supabaseSession) return;
     clearTimeout(cloudSaveTimer);
     cloudSaveTimer = setTimeout(() => saveCloudLedger(false), delay);
   }
@@ -560,53 +303,14 @@
     if (!supabaseClient) return;
     await supabaseClient.auth.signOut();
     supabaseSession = null;
-    cloudWorkspaces = [];
-    currentWorkspaceId = "";
-    localStorage.removeItem(CLOUD_WORKSPACE_KEY);
+    state = normalizeState({});
+    localStorage.removeItem(STORAGE_KEY);
+    render();
+    resetDeliveryForm();
+    resetSettlementForm();
     setSupabaseStatus("クラウド: 未ログイン", "warning");
     updateCloudAuthUi();
     toast("ログアウトしました。");
-  }
-
-  async function createWorkspace() {
-    try {
-      const client = requireSupabaseClient();
-      const name = $("#newWorkspaceName").value.trim() || "委託販売台帳";
-      const { data, error } = await client.rpc("create_personal_workspace", { workspace_name: name });
-      if (error) throw error;
-      await refreshCloudWorkspaces();
-      currentWorkspaceId = data?.id || currentWorkspaceId;
-      localStorage.setItem(CLOUD_WORKSPACE_KEY, currentWorkspaceId);
-      renderWorkspaceSelect();
-      if (hasLedgerContent() && confirm("現在ブラウザにある台帳データを新しいクラウド台帳へ保存しますか？") ) {
-        await saveCloudLedger(true);
-      } else {
-        await loadCloudLedger(false);
-      }
-      toast("クラウド台帳を作成しました。");
-    } catch (error) {
-      console.error(error);
-      toast(error.message || "台帳を作成できませんでした。");
-    }
-  }
-
-  async function joinWorkspace() {
-    try {
-      const client = requireSupabaseClient();
-      const code = $("#joinWorkspaceCode").value.trim();
-      if (!code) return toast("参加コードを入力してください。");
-      const { data, error } = await client.rpc("join_workspace_with_code", { join_code: code });
-      if (error) throw error;
-      await refreshCloudWorkspaces();
-      currentWorkspaceId = data?.id || currentWorkspaceId;
-      localStorage.setItem(CLOUD_WORKSPACE_KEY, currentWorkspaceId);
-      renderWorkspaceSelect();
-      await loadCloudLedger(true);
-      toast("クラウド台帳に参加しました。");
-    } catch (error) {
-      console.error(error);
-      toast(error.message || "台帳に参加できませんでした。");
-    }
   }
 
   async function handleSupabaseSessionChange(loadLedger = true) {
@@ -617,13 +321,9 @@
     }
     try {
       setSupabaseStatus("クラウド: 接続中", "warning");
-      await refreshCloudWorkspaces();
+      if (loadLedger) await loadCloudLedger(false);
+      else setSupabaseStatus("クラウド: ログイン中", "ready");
       updateCloudAuthUi();
-      if (currentWorkspaceId && loadLedger) {
-        await loadCloudLedger(false);
-      } else if (!currentWorkspaceId) {
-        setSupabaseStatus("クラウド: 台帳未作成", "warning");
-      }
     } catch (error) {
       console.error(error);
       setSupabaseStatus("クラウド: 接続失敗", "error");
@@ -1331,23 +1031,8 @@
     $("#signInSupabase").addEventListener("click", signInSupabase);
     $("#signUpSupabase").addEventListener("click", signUpSupabase);
     $("#signOutSupabase").addEventListener("click", signOutSupabase);
-    $("#createWorkspace").addEventListener("click", createWorkspace);
-    $("#joinWorkspace").addEventListener("click", joinWorkspace);
     $("#loadCloudLedger").addEventListener("click", () => loadCloudLedger(true).catch((error) => { console.error(error); toast(error.message || "クラウドから読み込めませんでした。"); }));
     $("#saveCloudLedger").addEventListener("click", () => saveCloudLedger(true));
-    $("#workspaceSelect").addEventListener("change", (event) => {
-      currentWorkspaceId = event.currentTarget.value;
-      if (currentWorkspaceId) localStorage.setItem(CLOUD_WORKSPACE_KEY, currentWorkspaceId);
-      renderWorkspaceSelect();
-      loadCloudLedger(true).catch((error) => { console.error(error); toast(error.message || "クラウドから読み込めませんでした。"); });
-    });
-    $("#chooseAutoSaveFile").addEventListener("click", chooseAutoSaveFile);
-    $("#openLedgerFile").addEventListener("click", openLedgerFile);
-    $("#setupAutoSaveFile").addEventListener("click", chooseAutoSaveFile);
-    $("#dismissSetupPrompt").addEventListener("click", () => {
-      localStorage.setItem(SETUP_DISMISSED_KEY, "1");
-      updateSetupPrompt();
-    });
     $("#closeOnboarding").addEventListener("click", () => closeOnboarding(false));
     $("#skipOnboarding").addEventListener("click", () => closeOnboarding(true));
     $("#prevOnboarding").addEventListener("click", prevOnboarding);
@@ -1359,33 +1044,6 @@
       if (doc.type === "settlement") printSettlement(doc.id);
     });
 
-    $("#exportData").addEventListener("click", () => {
-      const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `委託販売管理バックアップ_${today()}.json`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-    });
-
-    $("#importData").addEventListener("change", (event) => {
-      const file = event.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          state = normalizeState(JSON.parse(reader.result));
-          saveState();
-          render();
-          resetDeliveryForm();
-          resetSettlementForm();
-          toast("データを読み込みました。");
-        } catch {
-          toast("JSONを読み込めませんでした。");
-        }
-      };
-      reader.readAsText(file);
-    });
 
     document.addEventListener("click", (event) => {
       const target = event.target;
@@ -1455,31 +1113,10 @@
     resetProductForm();
     resetDeliveryForm();
     resetSettlementForm();
-    updateSetupPrompt();
     showOnboarding();
     registerServiceWorker();
     initSupabase();
-    if (isSupabaseConfigured()) {
-      setAutoSaveStatus("ローカル控え: ブラウザ内", "ready");
-      updateSetupPrompt();
-      return;
-    }
-    initAutoSaveFile().then(() => {
-      render();
-      resetDeliveryForm();
-      resetSettlementForm();
-      updateSetupPrompt();
-    }).catch((error) => {
-      console.error(error);
-      setAutoSaveStatus("自動保存: 再設定が必要", "warning");
-      updateSetupPrompt();
-    });
   }
 
   init();
 })();
-
-
-
-
-

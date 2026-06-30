@@ -1146,8 +1146,6 @@ th.numeric {
   }
 
   .side-actions #supabaseStatus,
-  .side-actions #googleDriveStatus,
-  .side-actions #autoSaveStatus,
   .side-actions #openCloudPanel {
     display: flex !important;
     align-items: center;
@@ -1488,8 +1486,6 @@ th.numeric {
   }
 
   .side-actions #supabaseStatus,
-  .side-actions #googleDriveStatus,
-  .side-actions #autoSaveStatus,
   .side-actions #openCloudPanel {
     min-height: 50px;
     padding: 12px 14px;
@@ -1717,4 +1713,3 @@ th.numeric {
     page-break-after: always;
   }
 }
-

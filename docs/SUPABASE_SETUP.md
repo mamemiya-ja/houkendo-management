@@ -1,98 +1,52 @@
-# GitHub Pages + Supabase + PWA セットアップ
+# Supabaseセットアップ手順
 
-この手順では、PCとスマホで同じ委託販売台帳を同期できるようにします。
-アプリ本体は GitHub Pages に置き、台帳データは Supabase のデータベースに保存します。
+このアプリはGitHub PagesからSupabaseへ接続し、ログイン中の1アカウント専用台帳を保存します。各アカウントは、それぞれ自分専用の台帳を使います。
 
-## 費用を抑えるための注意
+## 1. Project URLとpublishable keyを確認
 
-個人利用、小規模な台帳運用では Supabase の Free プランから始められます。
-
-- Supabaseプロジェクトは Free プランのまま使います。
-- クレジットカード登録や有料アドオンは不要です。
-- Compute のアップグレード、Pro プラン、追加ストレージは選ばないでください。
-- 使用量画面はときどき確認してください。
-
-このアプリは台帳全体を1つのJSONとして保存します。大量の画像を登録する、頻繁に大規模更新する、外部販売用に多数ユーザーへ提供する段階では、テーブル設計やバックアップ方法を見直してください。
-
-## 1. Supabaseプロジェクトを作る
-
-1. [Supabase](https://supabase.com/) で新しいプロジェクトを作成します。
-2. Project Settings > API を開き、`Project URL` と `anon public key` を控えます。
-3. Authentication > Providers で Email が有効になっていることを確認します。
-4. Authentication > URL Configuration で GitHub Pages のURLを `Site URL` と `Redirect URLs` に登録します。
-
-ローカルで確認する場合は、`Redirect URLs` に次も追加します。
-
-```text
-http://localhost:8000
-http://127.0.0.1:8000
-```
-
-## 2. データベースを作る
-
-Supabase の SQL Editor を開き、このリポジトリの `supabase/schema.sql` をすべて貼り付けて実行します。
-
-作成される主なテーブルは次の3つです。
-
-- `workspaces`: 台帳そのもの。参加コードを持ちます。
-- `workspace_members`: どのユーザーがどの台帳に参加しているかを管理します。
-- `ledgers`: アプリの台帳データをJSONとして保存します。
-
-Row Level Security を有効にしているため、同じ台帳のメンバーだけが台帳データを読み書きできます。
-
-## 3. アプリへSupabase接続先を設定する
-
-`supabase-config.js` にSupabaseの値を入れます。
+1. Supabaseの対象プロジェクトを開きます。
+2. `Project Settings` > `API` を開きます。
+3. `Project URL` と `publishable` keyを控えます。
+4. `supabase-config.js` に次の形で設定します。
 
 ```js
 window.HOUKENDO_SUPABASE = {
-  url: "https://xxxxxxxxxxxx.supabase.co",
-  anonKey: "eyJ..."
+  url: "https://YOUR_PROJECT_ID.supabase.co",
+  anonKey: "YOUR_SUPABASE_PUBLISHABLE_KEY"
 };
 ```
 
-`anonKey` はブラウザ用の公開キーです。秘密鍵ではありません。ただし公開キーで使う前提なので、必ず `supabase/schema.sql` のRLSを先に設定してください。
+publishable keyはブラウザに置く前提のキーです。ただし、service role keyやJWT secretは公開リポジトリに置かないでください。
 
-## 4. GitHub Pagesへ公開する
+## 2. Authenticationを設定
 
-GitHub のリポジトリ設定で Pages を有効にします。
+1. Supabaseの `Authentication` > `URL Configuration` を開きます。
+2. `Site URL` にGitHub Pagesの公開URLを設定します。
+3. `Redirect URLs` に同じ公開URLを追加します。
+4. ローカル確認も行う場合だけ、`http://localhost:8000` など開発用URLを追加します。
 
-- Source: `Deploy from a branch`
-- Branch: `main`
-- Folder: `/root`
+## 3. データベースを作成
 
-公開URLを開き、左側の `ログイン/同期` からクラウド台帳を使います。
+1. Supabaseの `SQL Editor` を開きます。
+2. このリポジトリの [supabase/schema.sql](../supabase/schema.sql) の内容を貼り付けます。
+3. `Run` を押して実行します。
 
-## 5. 最初の利用者の流れ
+作成される主なテーブルは `user_ledgers` だけです。`user_id` がログインユーザーと一致する行だけを読み書きできるよう、Row Level Securityを有効にしています。
 
-1. GitHub Pages のURLを開きます。
-2. `ログイン/同期` を押します。
-3. メールアドレスとパスワードで `新規登録` します。
-4. ログイン後、`台帳を作成` を押します。
-5. すでにブラウザ内にデータがある場合は、確認画面でクラウドへ保存します。
-6. 表示された `参加コード` を共有相手に伝えます。
+過去の共有台帳用スキーマが存在する場合、このSQLは台帳所有者のデータを `user_ledgers` に移した後、旧スキーマを削除します。
 
-## 6. 共有相手の参加方法
+## 4. アプリで動作確認
 
-1. 同じ GitHub Pages のURLを開きます。
-2. `ログイン/同期` を押します。
-3. 共有相手自身のメールアドレスとパスワードで `新規登録` します。
-4. ログイン後、参加コードを入力して `台帳に参加` を押します。
-5. 同じクラウド台帳が読み込まれます。
+1. GitHub Pagesのアプリを開きます。
+2. 左下の `ログイン/同期` を押します。
+3. メールアドレスと8文字以上のパスワードで `新規登録` します。
+4. 確認メールが届いた場合は、メール内のリンクを開いて登録を完了します。
+5. ログイン後、取引先や商品を登録し、画面左下が `クラウド: 保存済` になることを確認します。
+6. 別端末や別ブラウザで同じアカウントにログインし、`クラウドから読込` で同じ台帳が表示されることを確認します。
 
-参加コードは台帳に入るための合鍵のようなものです。共有相手以外には渡さないでください。
+## 5. セキュリティ方針
 
-## 7. スマホでアプリとして使う
-
-iPhone の場合は Safari でURLを開き、共有ボタンから `ホーム画面に追加` を選びます。
-
-Android の場合は Chrome でURLを開き、メニューから `アプリをインストール` または `ホーム画面に追加` を選びます。
-
-PWAとして起動するとブラウザのアドレスバーが減り、通常のWebページよりアプリに近い表示になります。
-
-## 運用上の注意
-
-- 同時編集は避けてください。現状はあとから保存した内容が優先されます。
-- 大きな変更前は、アプリ内の `手動バックアップ` でJSONを保存してください。
-- 共有相手が入力中のときに自分も同じ台帳を編集する運用は避けてください。
-- 外販や複数事業者利用へ広げる場合は、台帳ごとの権限管理、競合検知、バックアップ機能を強化してください。
+- `anon` / `publishable` keyは公開される前提ですが、RLSで必ずアクセス制御します。
+- `service role` keyはブラウザ、GitHub Pages、GitHubリポジトリに置かないでください。
+- SQLを変更した場合は、`user_ledgers` のRLSポリシーが残っていることを確認してください。
+- GitHub PagesのURLを変更した場合は、Supabase AuthenticationのURL設定も更新してください。
