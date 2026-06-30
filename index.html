@@ -38,7 +38,7 @@
     </section>
   </div>
   <div id="appShell" class="app-shell" hidden>
-    <aside class="sidebar">
+    <aside id="appSidebar" class="sidebar">
       <div class="brand">
         <div class="brand-mark">委</div>
         <div>
@@ -61,12 +61,16 @@
         <button id="logoutButton" class="ghost-button logout-button" type="button">ログアウト</button>
       </div>
     </aside>
+    <button id="mobileMenuBackdrop" class="mobile-menu-backdrop" type="button" aria-label="メニューを閉じる" hidden></button>
 
     <main class="workspace">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">Cloud ledger</p>
-          <h2 id="viewTitle">ホーム</h2>
+        <div class="topbar-title">
+          <button id="mobileMenuToggle" class="mobile-menu-toggle" type="button" aria-label="メニューを開く" aria-controls="appSidebar" aria-expanded="false"><span aria-hidden="true">☰</span></button>
+          <div>
+            <p class="eyebrow">Cloud ledger</p>
+            <h2 id="viewTitle">ホーム</h2>
+          </div>
         </div>
         <div class="top-actions">
           <button id="seedData" class="secondary-button">サンプル投入</button>
@@ -93,6 +97,12 @@
             <span>未精算見込</span>
             <strong id="statRevenue">¥0</strong>
           </article>
+        </div>
+        <div class="quick-actions" aria-label="よく使う操作">
+          <button class="primary-button" data-view-link="deliveries">納品を登録</button>
+          <button class="secondary-button" data-view-link="inventory">在庫を見る</button>
+          <button class="secondary-button" data-view-link="products">商品を追加</button>
+          <button class="secondary-button" data-view-link="settlements">精算を作成</button>
         </div>
         <div class="two-column">
           <section class="panel">
@@ -279,6 +289,7 @@
           <article class="metric"><span>累計販売数</span><strong id="reportUnits">0</strong></article>
           <article class="metric"><span>平均手数料率</span><strong id="reportRate">0%</strong></article>
         </div>
+
         <div class="two-column">
           <section class="panel">
             <h3>取引先別売上</h3>

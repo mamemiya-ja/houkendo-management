@@ -287,6 +287,22 @@
   }
 
 
+  function setMobileMenu(isOpen) {
+    document.body.classList.toggle("mobile-menu-open", isOpen);
+    const toggle = $("#mobileMenuToggle");
+    const backdrop = $("#mobileMenuBackdrop");
+    if (toggle) toggle.setAttribute("aria-expanded", String(isOpen));
+    if (backdrop) backdrop.hidden = !isOpen;
+  }
+
+  function closeMobileMenu() {
+    setMobileMenu(false);
+  }
+
+  function toggleMobileMenu() {
+    setMobileMenu(!document.body.classList.contains("mobile-menu-open"));
+  }
+
   async function signOutSupabase() {
     try {
       setLogoutBusy(true);
@@ -606,7 +622,11 @@
 
   function table(headers, rows) {
     if (!rows.length) return `<p class="muted">表示するデータがありません。</p>`;
-    return `<table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell, index) => `<td class="${typeof cell === "number" || index > 1 && String(cell).startsWith("¥") ? "numeric" : ""}">${cell}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    const labelFor = (index) => esc(headers[index] || "操作");
+    return `<table class="data-table"><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell, index) => {
+      const isNumeric = typeof cell === "number" || index > 1 && String(cell).startsWith("¥");
+      return `<td class="${isNumeric ? "numeric" : ""}" data-label="${labelFor(index)}">${cell}</td>`;
+    }).join("")}</tr>`).join("")}</tbody></table>`;
   }
 
   function actions(type, id) {
@@ -927,9 +947,17 @@
     });
     $("#loginSignUp").addEventListener("click", () => signUpSupabase("login"));
     $("#logoutButton").addEventListener("click", signOutSupabase);
+    $("#mobileMenuToggle").addEventListener("click", toggleMobileMenu);
+    $("#mobileMenuBackdrop").addEventListener("click", closeMobileMenu);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeMobileMenu();
+    });
 
     $$(".nav-item, [data-view-link]").forEach((button) => {
-      button.addEventListener("click", () => showView(button.dataset.view || button.dataset.viewLink));
+      button.addEventListener("click", () => {
+        showView(button.dataset.view || button.dataset.viewLink);
+        closeMobileMenu();
+      });
     });
 
     $("#partnerForm").addEventListener("submit", (event) => {
