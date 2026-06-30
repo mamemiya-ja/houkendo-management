@@ -303,6 +303,11 @@
     setMobileMenu(!document.body.classList.contains("mobile-menu-open"));
   }
 
+  function updateMobileScrollState() {
+    const isMobile = window.matchMedia("(max-width: 980px), (hover: none) and (pointer: coarse)").matches;
+    document.body.classList.toggle("mobile-scrolled", isMobile && window.scrollY > 12);
+  }
+
   async function signOutSupabase() {
     try {
       setLogoutBusy(true);
@@ -952,6 +957,9 @@
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeMobileMenu();
     });
+    window.addEventListener("scroll", updateMobileScrollState, { passive: true });
+    window.addEventListener("resize", updateMobileScrollState);
+    updateMobileScrollState();
 
     $$(".nav-item, [data-view-link]").forEach((button) => {
       button.addEventListener("click", () => {
