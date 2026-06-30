@@ -14,6 +14,29 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div id="loginScreen" class="login-screen">
+    <section class="login-card" aria-labelledby="loginTitle">
+      <div class="login-brand">
+        <div class="brand-mark">委</div>
+        <div>
+          <p class="eyebrow">Cloud ledger</p>
+          <h1 id="loginTitle">委託販売管理</h1>
+        </div>
+      </div>
+      <div id="loginConfigNotice" class="notice warning" hidden>
+        Supabaseの接続先が未設定です。supabase-config.js にURLとanon keyを設定してください。
+      </div>
+      <form id="loginForm" class="login-form">
+        <label>メールアドレス<input id="loginEmail" type="email" autocomplete="email" placeholder="name@example.com" required></label>
+        <label>パスワード<input id="loginPassword" type="password" autocomplete="current-password" placeholder="8文字以上" required></label>
+        <div class="form-actions">
+          <button id="loginSubmit" class="primary-button" type="submit">ログイン</button>
+          <button id="loginSignUp" class="secondary-button" type="button">新規登録</button>
+        </div>
+      </form>
+      <p id="loginStatus" class="login-status" role="status">接続を確認しています。</p>
+    </section>
+  </div>
   <div id="cloudAuthPanel" class="auth-shell" hidden>
     <section class="auth-card">
       <div class="auth-head">
@@ -52,7 +75,7 @@
     </section>
   </div>
 
-  <div class="app-shell">
+  <div id="appShell" class="app-shell" hidden>
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark">委</div>

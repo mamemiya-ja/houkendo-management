@@ -31,6 +31,8 @@
   let onboardingIndex = 0;
   let supabaseClient = null;
   let supabaseSession = null;
+  let authReady = false;
+  let onboardingShownForSession = false;
   let cloudSaveTimer = null;
   let cloudSaveInProgress = false;
   let cloudSaveQueued = false;
@@ -38,7 +40,7 @@
   const onboardingSteps = [
     {
       title: "クラウド台帳にログインします",
-      body: "このアプリはSupabase上のクラウド台帳へ保存します。\n左側の「ログイン/同期」からメールアドレスとパスワードでログインしてください。",
+      body: "このアプリはSupabase上のクラウド台帳へ保存します。\nログイン画面でメールアドレスとパスワードを入力してください。",
       view: "dashboard"
     },
     {
@@ -157,6 +159,56 @@
     status.classList.toggle("error", mode === "error");
   }
 
+  function setLoginStatus(message, mode = "") {
+    const status = $("#loginStatus");
+    if (!status) return;
+    status.textContent = message || "";
+    status.classList.toggle("ready", mode === "ready");
+    status.classList.toggle("error", mode === "error");
+  }
+
+  function setLoginBusy(isBusy, message = "") {
+    const submit = $("#loginSubmit");
+    const signUp = $("#loginSignUp");
+    if (submit) submit.disabled = isBusy;
+    if (signUp) signUp.disabled = isBusy;
+    if (message) setLoginStatus(message);
+  }
+
+  function updateAuthScreens() {
+    const signedIn = Boolean(supabaseSession);
+    const configured = isSupabaseConfigured();
+    const loginScreen = $("#loginScreen");
+    const appShell = $("#appShell");
+    const loginForm = $("#loginForm");
+    const loginConfigNotice = $("#loginConfigNotice");
+    if (loginScreen) loginScreen.hidden = signedIn;
+    if (appShell) appShell.hidden = !signedIn;
+    if (loginForm) loginForm.hidden = !configured;
+    if (loginConfigNotice) loginConfigNotice.hidden = configured;
+    setLoginBusy(false);
+    if (signedIn) {
+      const loginPassword = $("#loginPassword");
+      if (loginPassword) loginPassword.value = "";
+      setLoginStatus("");
+      return;
+    }
+    if (!configured) {
+      setLoginStatus("Supabase設定を確認してください。", "error");
+      return;
+    }
+    setLoginStatus(authReady ? "ログインしてください。" : "接続を確認しています。");
+  }
+
+  function authCredentials(source = "panel") {
+    const emailInput = source === "login" ? $("#loginEmail") : $("#authEmail");
+    const passwordInput = source === "login" ? $("#loginPassword") : $("#authPassword");
+    return {
+      email: emailInput?.value.trim() || "",
+      password: passwordInput?.value || ""
+    };
+  }
+
   function requireSupabaseClient() {
     if (!isSupabaseConfigured()) throw new Error("Supabaseの接続先が未設定です。");
     if (!window.supabase?.createClient) throw new Error("Supabaseライブラリを読み込めませんでした。");
@@ -169,6 +221,10 @@
   }
 
   function openCloudPanel() {
+    if (!supabaseSession) {
+      updateAuthScreens();
+      return;
+    }
     const panel = $("#cloudAuthPanel");
     if (!panel) return;
     panel.hidden = false;
@@ -268,34 +324,65 @@
     cloudSaveTimer = setTimeout(() => saveCloudLedger(false), delay);
   }
 
-  async function signInSupabase() {
+  async function signInSupabase(source = "panel") {
+    const fromLogin = source === "login";
     try {
       const client = requireSupabaseClient();
-      const email = $("#authEmail").value.trim();
-      const password = $("#authPassword").value;
-      if (!email || !password) return toast("メールアドレスとパスワードを入力してください。");
-      const { error } = await client.auth.signInWithPassword({ email, password });
+      const { email, password } = authCredentials(source);
+      if (!email || !password) {
+        const message = "メールアドレスとパスワードを入力してください。";
+        if (fromLogin) setLoginStatus(message, "error");
+        return toast(message);
+      }
+      if (fromLogin) setLoginBusy(true, "ログインしています。");
+      const { data, error } = await client.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      supabaseSession = data.session || supabaseSession;
+      if (fromLogin) setLoginStatus("ログインしました。", "ready");
       toast("ログインしました。");
+      await handleSupabaseSessionChange(true);
     } catch (error) {
       console.error(error);
-      toast(error.message || "ログインできませんでした。");
+      const message = error.message || "ログインできませんでした。";
+      if (fromLogin) setLoginStatus(message, "error");
+      toast(message);
+    } finally {
+      if (fromLogin) setLoginBusy(false);
+      if (supabaseSession) updateAuthScreens();
     }
   }
 
-  async function signUpSupabase() {
+  async function signUpSupabase(source = "panel") {
+    const fromLogin = source === "login";
     try {
       const client = requireSupabaseClient();
-      const email = $("#authEmail").value.trim();
-      const password = $("#authPassword").value;
-      if (!email || password.length < 8) return toast("メールアドレスと8文字以上のパスワードを入力してください。");
+      const { email, password } = authCredentials(source);
+      if (!email || password.length < 8) {
+        const message = "メールアドレスと8文字以上のパスワードを入力してください。";
+        if (fromLogin) setLoginStatus(message, "error");
+        return toast(message);
+      }
+      if (fromLogin) setLoginBusy(true, "登録しています。");
       const { data, error } = await client.auth.signUp({ email, password });
       if (error) throw error;
-      if (data.session) toast("アカウントを作成しました。");
-      else toast("確認メールを送信しました。メール内のリンクを開いてください。");
+      if (data.session) {
+        supabaseSession = data.session;
+        if (fromLogin) setLoginStatus("アカウントを作成しました。", "ready");
+        toast("アカウントを作成しました。");
+        await handleSupabaseSessionChange(true);
+      } else {
+        const message = "確認メールを送信しました。メール内のリンクを開いてください。";
+        if (fromLogin) setLoginStatus(message, "ready");
+        toast(message);
+      }
     } catch (error) {
       console.error(error);
-      toast(error.message || "新規登録できませんでした。");
+      const message = error.message || "新規登録できませんでした。";
+      if (fromLogin) setLoginStatus(message, "error");
+      toast(message);
+    } finally {
+      if (fromLogin) setLoginBusy(false);
+      if (supabaseSession) updateAuthScreens();
     }
   }
 
@@ -303,19 +390,26 @@
     if (!supabaseClient) return;
     await supabaseClient.auth.signOut();
     supabaseSession = null;
+    onboardingShownForSession = false;
     state = normalizeState({});
     localStorage.removeItem(STORAGE_KEY);
     render();
     resetDeliveryForm();
     resetSettlementForm();
+    closeCloudPanel();
+    closeOnboarding(false);
     setSupabaseStatus("クラウド: 未ログイン", "warning");
     updateCloudAuthUi();
+    updateAuthScreens();
     toast("ログアウトしました。");
   }
 
   async function handleSupabaseSessionChange(loadLedger = true) {
     updateCloudAuthUi();
+    updateAuthScreens();
     if (!supabaseSession) {
+      onboardingShownForSession = false;
+      closeCloudPanel();
       setSupabaseStatus(isSupabaseConfigured() ? "クラウド: 未ログイン" : "クラウド: 未設定", isSupabaseConfigured() ? "warning" : "");
       return;
     }
@@ -324,31 +418,45 @@
       if (loadLedger) await loadCloudLedger(false);
       else setSupabaseStatus("クラウド: ログイン中", "ready");
       updateCloudAuthUi();
+      updateAuthScreens();
+      closeCloudPanel();
+      if (!onboardingShownForSession) {
+        onboardingShownForSession = true;
+        showOnboarding();
+      }
     } catch (error) {
       console.error(error);
       setSupabaseStatus("クラウド: 接続失敗", "error");
+      updateAuthScreens();
       toast(error.message || "クラウドに接続できませんでした。");
     }
   }
 
   async function initSupabase() {
     updateCloudAuthUi();
+    updateAuthScreens();
     if (!isSupabaseConfigured()) {
+      authReady = true;
       setSupabaseStatus("クラウド: 未設定", "warning");
+      updateAuthScreens();
       return;
     }
     try {
       const client = requireSupabaseClient();
       const { data } = await client.auth.getSession();
+      authReady = true;
       supabaseSession = data.session;
       client.auth.onAuthStateChange((_event, session) => {
+        authReady = true;
         supabaseSession = session;
         handleSupabaseSessionChange(true);
       });
       await handleSupabaseSessionChange(true);
     } catch (error) {
       console.error(error);
+      authReady = true;
       setSupabaseStatus("クラウド: 初期化失敗", "error");
+      updateAuthScreens();
     }
   }
 
@@ -918,6 +1026,12 @@
   }
 
   function wireEvents() {
+    $("#loginForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      signInSupabase("login");
+    });
+    $("#loginSignUp").addEventListener("click", () => signUpSupabase("login"));
+
     $$(".nav-item, [data-view-link]").forEach((button) => {
       button.addEventListener("click", () => showView(button.dataset.view || button.dataset.viewLink));
     });
@@ -1028,8 +1142,8 @@
     $("#showGuide").addEventListener("click", () => showOnboarding(true));
     $("#openCloudPanel").addEventListener("click", openCloudPanel);
     $("#closeCloudPanel").addEventListener("click", closeCloudPanel);
-    $("#signInSupabase").addEventListener("click", signInSupabase);
-    $("#signUpSupabase").addEventListener("click", signUpSupabase);
+    $("#signInSupabase").addEventListener("click", () => signInSupabase("panel"));
+    $("#signUpSupabase").addEventListener("click", () => signUpSupabase("panel"));
     $("#signOutSupabase").addEventListener("click", signOutSupabase);
     $("#loadCloudLedger").addEventListener("click", () => loadCloudLedger(true).catch((error) => { console.error(error); toast(error.message || "クラウドから読み込めませんでした。"); }));
     $("#saveCloudLedger").addEventListener("click", () => saveCloudLedger(true));
@@ -1113,7 +1227,7 @@
     resetProductForm();
     resetDeliveryForm();
     resetSettlementForm();
-    showOnboarding();
+    updateAuthScreens();
     registerServiceWorker();
     initSupabase();
   }
