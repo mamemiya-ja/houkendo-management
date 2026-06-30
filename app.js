@@ -2,8 +2,6 @@
   "use strict";
 
   const STORAGE_KEY = "consignment-ledger-v1";
-  const ONBOARDING_DONE_KEY = "consignment-ledger-onboarding-done";
-  const ONBOARDING_VERSION = "2026-06-05";
   const taxRates = { taxable: 10, reduced: 8, exempt: 0 };
   const taxNames = { taxable: "課税10%", reduced: "軽減8%", exempt: "非課税" };
 
@@ -28,47 +26,13 @@
   let state = loadState();
   let productImageDraft = "";
   let inventoryMode = "partner";
-  let onboardingIndex = 0;
   let supabaseClient = null;
   let supabaseSession = null;
   let authReady = false;
-  let onboardingShownForSession = false;
   let cloudSaveTimer = null;
   let cloudSaveInProgress = false;
   let cloudSaveQueued = false;
 
-  const onboardingSteps = [
-    {
-      title: "クラウド台帳にログインします",
-      body: "このアプリはSupabase上のクラウド台帳へ保存します。\nログイン画面でメールアドレスとパスワードを入力してください。",
-      view: "dashboard"
-    },
-    {
-      title: "自社情報と帳票設定を入れます",
-      body: "「設定」で屋号、住所、電話番号、振込先、インボイス登録番号を入力します。\nここに入れた内容が納品書や請求書に印字されます。",
-      view: "settings"
-    },
-    {
-      title: "取引先と商品を登録します",
-      body: "委託先は「取引先」、預ける品物は「商品」に登録します。\n取引先ごとの手数料率や掛率、商品の販売価格や税区分もここで管理します。",
-      view: "partners"
-    },
-    {
-      title: "委託納品を登録します",
-      body: "「委託納品」で、いつ、どの取引先へ、どの商品を何個預けたかを登録します。\n登録した内容からA4の委託販売納品書を印刷できます。",
-      view: "deliveries"
-    },
-    {
-      title: "販売数を入れて精算します",
-      body: "「精算・請求」で取引先を選び、「在庫読込」を押すと現在の預け在庫が表示されます。\n販売数や返品数を入力すると、手数料、消費税、請求額が自動計算されます。",
-      view: "settlements"
-    },
-    {
-      title: "在庫確認と印刷ができます",
-      body: "「在庫」で取引先別・商品別・長期滞留を確認できます。\n納品履歴や精算履歴の「印刷」からA4帳票を出し、印刷画面でPDF保存もできます。",
-      view: "inventory"
-    }
-  ];
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -100,46 +64,6 @@
     queueSupabaseSave();
   }
 
-  function updateOnboarding() {
-    const box = $("#onboarding");
-    if (!box) return;
-    const step = onboardingSteps[onboardingIndex];
-    $("#onboardingStepCount").textContent = `${onboardingIndex + 1} / ${onboardingSteps.length}`;
-    $("#onboardingTitle").textContent = step.title;
-    $("#onboardingBody").textContent = step.body;
-    $("#prevOnboarding").disabled = onboardingIndex === 0;
-    $("#nextOnboarding").textContent = onboardingIndex === onboardingSteps.length - 1 ? "完了" : "次へ";
-  }
-
-  function showOnboarding(force = false) {
-    if (!force && localStorage.getItem(ONBOARDING_DONE_KEY) === ONBOARDING_VERSION) return;
-    onboardingIndex = 0;
-    $("#onboarding").hidden = false;
-    showView(onboardingSteps[onboardingIndex].view);
-    updateOnboarding();
-  }
-
-  function closeOnboarding(markDone = false) {
-    if (markDone) localStorage.setItem(ONBOARDING_DONE_KEY, ONBOARDING_VERSION);
-    $("#onboarding").hidden = true;
-  }
-
-  function nextOnboarding() {
-    if (onboardingIndex >= onboardingSteps.length - 1) {
-      closeOnboarding(true);
-      return;
-    }
-    onboardingIndex += 1;
-    showView(onboardingSteps[onboardingIndex].view);
-    updateOnboarding();
-  }
-
-  function prevOnboarding() {
-    if (onboardingIndex <= 0) return;
-    onboardingIndex -= 1;
-    showView(onboardingSteps[onboardingIndex].view);
-    updateOnboarding();
-  }
 
   function supabaseConfig() {
     return window.HOUKENDO_SUPABASE || {};
@@ -200,15 +124,12 @@
     setLoginStatus(authReady ? "ログインしてください。" : "接続を確認しています。");
   }
 
-  function authCredentials(source = "panel") {
-    const emailInput = source === "login" ? $("#loginEmail") : $("#authEmail");
-    const passwordInput = source === "login" ? $("#loginPassword") : $("#authPassword");
+  function authCredentials() {
     return {
-      email: emailInput?.value.trim() || "",
-      password: passwordInput?.value || ""
+      email: $("#loginEmail")?.value.trim() || "",
+      password: $("#loginPassword")?.value || ""
     };
   }
-
   function requireSupabaseClient() {
     if (!isSupabaseConfigured()) throw new Error("Supabaseの接続先が未設定です。");
     if (!window.supabase?.createClient) throw new Error("Supabaseライブラリを読み込めませんでした。");
@@ -220,32 +141,6 @@
     return supabaseClient;
   }
 
-  function openCloudPanel() {
-    if (!supabaseSession) {
-      updateAuthScreens();
-      return;
-    }
-    const panel = $("#cloudAuthPanel");
-    if (!panel) return;
-    panel.hidden = false;
-    updateCloudAuthUi();
-  }
-
-  function closeCloudPanel() {
-    const panel = $("#cloudAuthPanel");
-    if (panel) panel.hidden = true;
-  }
-
-
-  function updateCloudAuthUi() {
-    const panel = $("#cloudAuthPanel");
-    if (!panel) return;
-    const configured = isSupabaseConfigured();
-    $("#supabaseConfigNotice").hidden = configured;
-    $("#authSignedOut").hidden = !configured || Boolean(supabaseSession);
-    $("#authSignedIn").hidden = !configured || !supabaseSession;
-    $("#cloudUserEmail").textContent = supabaseSession?.user?.email || "-";
-  }
 
   function hasLedgerContent() {
     return Boolean(state.partners.length || state.products.length || state.deliveries.length || state.settlements.length);
@@ -324,7 +219,7 @@
     cloudSaveTimer = setTimeout(() => saveCloudLedger(false), delay);
   }
 
-  async function signInSupabase(source = "panel") {
+  async function signInSupabase(source = "login") {
     const fromLogin = source === "login";
     try {
       const client = requireSupabaseClient();
@@ -352,7 +247,7 @@
     }
   }
 
-  async function signUpSupabase(source = "panel") {
+  async function signUpSupabase(source = "login") {
     const fromLogin = source === "login";
     try {
       const client = requireSupabaseClient();
@@ -386,30 +281,10 @@
     }
   }
 
-  async function signOutSupabase() {
-    if (!supabaseClient) return;
-    await supabaseClient.auth.signOut();
-    supabaseSession = null;
-    onboardingShownForSession = false;
-    state = normalizeState({});
-    localStorage.removeItem(STORAGE_KEY);
-    render();
-    resetDeliveryForm();
-    resetSettlementForm();
-    closeCloudPanel();
-    closeOnboarding(false);
-    setSupabaseStatus("クラウド: 未ログイン", "warning");
-    updateCloudAuthUi();
-    updateAuthScreens();
-    toast("ログアウトしました。");
-  }
 
   async function handleSupabaseSessionChange(loadLedger = true) {
-    updateCloudAuthUi();
     updateAuthScreens();
     if (!supabaseSession) {
-      onboardingShownForSession = false;
-      closeCloudPanel();
       setSupabaseStatus(isSupabaseConfigured() ? "クラウド: 未ログイン" : "クラウド: 未設定", isSupabaseConfigured() ? "warning" : "");
       return;
     }
@@ -417,13 +292,7 @@
       setSupabaseStatus("クラウド: 接続中", "warning");
       if (loadLedger) await loadCloudLedger(false);
       else setSupabaseStatus("クラウド: ログイン中", "ready");
-      updateCloudAuthUi();
       updateAuthScreens();
-      closeCloudPanel();
-      if (!onboardingShownForSession) {
-        onboardingShownForSession = true;
-        showOnboarding();
-      }
     } catch (error) {
       console.error(error);
       setSupabaseStatus("クラウド: 接続失敗", "error");
@@ -433,7 +302,6 @@
   }
 
   async function initSupabase() {
-    updateCloudAuthUi();
     updateAuthScreens();
     if (!isSupabaseConfigured()) {
       authReady = true;
@@ -1139,18 +1007,6 @@
     $("#partnerSearch").addEventListener("input", renderPartners);
     $("#productSearch").addEventListener("input", renderProducts);
     $("#seedData").addEventListener("click", seedData);
-    $("#showGuide").addEventListener("click", () => showOnboarding(true));
-    $("#openCloudPanel").addEventListener("click", openCloudPanel);
-    $("#closeCloudPanel").addEventListener("click", closeCloudPanel);
-    $("#signInSupabase").addEventListener("click", () => signInSupabase("panel"));
-    $("#signUpSupabase").addEventListener("click", () => signUpSupabase("panel"));
-    $("#signOutSupabase").addEventListener("click", signOutSupabase);
-    $("#loadCloudLedger").addEventListener("click", () => loadCloudLedger(true).catch((error) => { console.error(error); toast(error.message || "クラウドから読み込めませんでした。"); }));
-    $("#saveCloudLedger").addEventListener("click", () => saveCloudLedger(true));
-    $("#closeOnboarding").addEventListener("click", () => closeOnboarding(false));
-    $("#skipOnboarding").addEventListener("click", () => closeOnboarding(true));
-    $("#prevOnboarding").addEventListener("click", prevOnboarding);
-    $("#nextOnboarding").addEventListener("click", nextOnboarding);
     $("#printCurrent").addEventListener("click", () => {
       const doc = state.lastDocument || (state.settlements.at(-1) ? { type: "settlement", id: state.settlements.at(-1).id } : null);
       if (!doc) return toast("印刷できる帳票がまだありません。");

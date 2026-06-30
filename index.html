@@ -37,44 +37,6 @@
       <p id="loginStatus" class="login-status" role="status">接続を確認しています。</p>
     </section>
   </div>
-  <div id="cloudAuthPanel" class="auth-shell" hidden>
-    <section class="auth-card">
-      <div class="auth-head">
-        <div>
-          <p class="eyebrow">Cloud ledger</p>
-          <h2>クラウド台帳</h2>
-        </div>
-        <button id="closeCloudPanel" class="icon-action" type="button">閉じる</button>
-      </div>
-
-      <div id="supabaseConfigNotice" class="notice warning" hidden>
-        Supabaseの接続先が未設定です。supabase-config.js にURLとanon keyを設定してください。
-      </div>
-
-      <div id="authSignedOut" class="auth-section">
-        <p class="muted">ログインすると、自分専用のクラウド台帳を同期できます。</p>
-        <label>メールアドレス<input id="authEmail" type="email" autocomplete="email" placeholder="name@example.com"></label>
-        <label>パスワード<input id="authPassword" type="password" autocomplete="current-password" placeholder="8文字以上"></label>
-        <div class="form-actions">
-          <button id="signInSupabase" class="primary-button" type="button">ログイン</button>
-          <button id="signUpSupabase" class="secondary-button" type="button">新規登録</button>
-        </div>
-      </div>
-
-      <div id="authSignedIn" class="auth-section" hidden>
-        <div class="cloud-account">
-          <span>ログイン中</span>
-          <strong id="cloudUserEmail">-</strong>
-        </div>
-        <div class="form-actions">
-          <button id="loadCloudLedger" class="secondary-button" type="button">クラウドから読込</button>
-          <button id="saveCloudLedger" class="primary-button" type="button">クラウドへ保存</button>
-        </div>
-        <button id="signOutSupabase" class="text-button" type="button">ログアウト</button>
-      </div>
-    </section>
-  </div>
-
   <div id="appShell" class="app-shell" hidden>
     <aside class="sidebar">
       <div class="brand">
@@ -96,8 +58,6 @@
       </nav>
       <div class="side-actions">
         <div id="supabaseStatus" class="cloud-status">クラウド: 未設定</div>
-        <button id="openCloudPanel" class="ghost-button">ログイン/同期</button>
-        <button id="showGuide" class="ghost-button">使い方ガイド</button>
       </div>
     </aside>
 
@@ -354,23 +314,6 @@
   </div>
 
   <div id="printArea" aria-hidden="true"></div>
-  <div id="onboarding" class="onboarding" hidden role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
-    <div class="onboarding-card">
-      <div class="onboarding-head">
-        <span id="onboardingStepCount">1 / 6</span>
-        <button id="closeOnboarding" class="icon-action" type="button">閉じる</button>
-      </div>
-      <h2 id="onboardingTitle">使い方ガイド</h2>
-      <p id="onboardingBody"></p>
-      <div class="onboarding-actions">
-        <button id="skipOnboarding" class="secondary-button" type="button">次回から表示しない</button>
-        <div>
-          <button id="prevOnboarding" class="secondary-button" type="button">戻る</button>
-          <button id="nextOnboarding" class="primary-button" type="button">次へ</button>
-        </div>
-      </div>
-    </div>
-  </div>
   <div id="toast" role="status"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
